@@ -2,36 +2,23 @@ import type { Archetype } from "./archetype-map";
 
 export type VoicePreset = Archetype;
 
+export type VoiceResult =
+  | { kind: "audio"; audio: ArrayBuffer; mime: string }
+  | { kind: "stub"; reason: string };
+
+/**
+ * Stub: returns a placeholder until qwen3-omni-flash is wired up.
+ * Client should fall back to SpeechSynthesis or silence when kind === "stub".
+ */
 export async function generateSpeech(params: {
   text: string;
   voicePreset: VoicePreset;
   language: "en" | "zh";
-}): Promise<ArrayBuffer> {
-  const endpoint = process.env.GLM_VOICE_ENDPOINT;
-  const apiKey = process.env.ZAI_API_KEY_1;
-  if (!endpoint || !apiKey) {
-    throw new Error("GLM_VOICE_ENDPOINT or ZAI_API_KEY_1 is not set");
+}): Promise<VoiceResult> {
+  void params;
+  const apiKey = process.env.DASHSCOPE_API_KEY;
+  if (!apiKey) {
+    return { kind: "stub", reason: "DASHSCOPE_API_KEY is not set" };
   }
-
-  const res = await fetch(`${endpoint.replace(/\/$/, "")}/audio/speech`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "glm-4-voice",
-      input: params.text,
-      voice: params.voicePreset,
-      language: params.language,
-      speed: 1.0,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`GLM voice failed: ${res.status} ${body}`);
-  }
-
-  return res.arrayBuffer();
+  return { kind: "stub", reason: "qwen3-omni-flash integration pending" };
 }
