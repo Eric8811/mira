@@ -133,6 +133,14 @@ export default function Chat() {
         />
       </div>
 
+      {/* Match CTA — subtle, lower-left */}
+      <button
+        onClick={() => router.push("/match")}
+        className="fixed bottom-6 left-6 z-30 rounded-full border border-white/10 bg-black/30 px-4 py-2 text-xs uppercase tracking-[0.25em] text-white/60 backdrop-blur transition hover:border-white/30 hover:text-white/90"
+      >
+        {locale === "zh" ? "✦ 合盘" : "✦ read a match"}
+      </button>
+
       {/* Keyboard fallback */}
       <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
         <AnimatePresence>
