@@ -178,9 +178,9 @@ export class RealtimeSession {
         turn_detection: cfg.turnDetection
           ? {
               type: "server_vad",
-              threshold: 0.65,
+              threshold: 0.55,
               prefix_padding_ms: 300,
-              silence_duration_ms: 600,
+              silence_duration_ms: 350,
               create_response: true,
               interrupt_response: true,
             }

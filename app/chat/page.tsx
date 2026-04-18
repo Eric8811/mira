@@ -8,7 +8,11 @@ import { ARCHETYPE_META, type Archetype } from "@/lib/archetype-map";
 import { loadSession, type MiraSession } from "@/lib/session";
 import { useLocale } from "@/components/I18nProvider";
 import { RealtimeSession } from "@/lib/RealtimeSession";
-import { buildRealtimeInstructions, WS_PROXY_URL } from "@/lib/realtime-config";
+import {
+  buildEncounterTrigger,
+  buildRealtimeInstructions,
+  WS_PROXY_URL,
+} from "@/lib/realtime-config";
 import { useResponsiveSize } from "@/lib/useResponsiveSize";
 
 type ChatState =
@@ -21,6 +25,8 @@ type ChatState =
   | "speaking"
   | "reconnecting";
 
+const ENCOUNTER_FLAG = "mira-encounter-delivered";
+
 export default function Chat() {
   const { locale } = useLocale();
   const router = useRouter();
@@ -31,9 +37,29 @@ export default function Chat() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
+  const [micGranted, setMicGranted] = useState(false);
+  const [micPrompt, setMicPrompt] = useState(false);
 
   const rtRef = useRef<RealtimeSession | null>(null);
   const startedRef = useRef(false);
+
+  const enableMic = useCallback(async () => {
+    if (!rtRef.current || micGranted) return;
+    try {
+      await rtRef.current.startInputCapture();
+      setMicGranted(true);
+      setMicPrompt(false);
+      if (state === "connecting" || state === "speaking") {
+        // keep current state; onResponseDone will drop us into listening
+      } else {
+        setState("listening");
+      }
+    } catch (e) {
+      console.warn("[chat] mic denied/failed", e);
+      setMicPrompt(true);
+      setError((e as Error).message);
+    }
+  }, [micGranted, state]);
 
   useEffect(() => {
     const s = loadSession();
@@ -46,14 +72,20 @@ export default function Chat() {
     if (startedRef.current) return;
     startedRef.current = true;
 
+    const alreadyDelivered = sessionStorage.getItem(ENCOUNTER_FLAG) === "true";
+
     const rt = new RealtimeSession({
       onUserSpeechStarted: () => setState("hearing"),
       onUserSpeechStopped: () => setState("thinking"),
       onAudioStart: () => setState("speaking"),
-      onResponseDone: () => setState("listening"),
+      onResponseDone: () => {
+        setState("listening");
+        if (!alreadyDelivered) {
+          sessionStorage.setItem(ENCOUNTER_FLAG, "true");
+        }
+      },
       onReconnecting: (attempt) => {
         console.log("[chat] reconnecting", attempt);
-        // Only surface UI after the 2nd attempt — the 1st often succeeds invisibly.
         if (attempt >= 2) setState("reconnecting");
       },
       onReconnected: () => {
@@ -88,13 +120,20 @@ export default function Chat() {
         return;
       }
 
+      // On the first visit, Mira opens with the First Encounter right away — no mic needed yet.
+      if (!alreadyDelivered) {
+        setState("thinking"); // brief gap while tokens warm up
+        rt.triggerResponse(buildEncounterTrigger(s));
+      }
+
+      // Try to start mic immediately (succeeds silently if previously granted).
       try {
         await rt.startInputCapture();
-        setState("listening");
+        setMicGranted(true);
+        if (alreadyDelivered) setState("listening");
       } catch (e) {
-        console.warn("[chat] mic denied", e);
-        setState("mic-denied");
-        setError((e as Error).message);
+        console.warn("[chat] mic pending user action", e);
+        setMicPrompt(true);
       }
     })();
 
@@ -118,6 +157,9 @@ export default function Chat() {
   const archetype: Archetype = session.archetype;
   const meta = ARCHETYPE_META[archetype];
 
+  const orbState: "idle" | "thinking" | "speaking" =
+    state === "speaking" ? "speaking" : state === "thinking" || state === "hearing" ? "thinking" : "idle";
+
   return (
     <main
       className="mira-stars relative flex min-h-[100dvh] flex-col items-center justify-center px-6 py-10 sm:px-8 sm:py-12"
@@ -132,11 +174,33 @@ export default function Chat() {
       <div className="relative z-10 flex flex-1 flex-col items-center justify-center">
         <MiraCharacter
           archetype={archetype}
-          state={state === "speaking" ? "speaking" : "idle"}
+          state={orbState}
           size={charSize}
           analyser={analyser}
         />
       </div>
+
+      {/* Friendly mic permission prompt */}
+      <AnimatePresence>
+        {micPrompt && !micGranted && (
+          <motion.button
+            key="mic-prompt"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            onClick={enableMic}
+            className="fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-[var(--mira-accent)]/50 bg-black/50 px-5 py-3 text-sm text-white backdrop-blur transition hover:border-[var(--mira-accent)]"
+            style={{ bottom: "max(5rem, calc(env(safe-area-inset-bottom) + 4rem))" }}
+          >
+            <span>🎙️</span>
+            <span>
+              {locale === "zh"
+                ? "允许麦克风，Mira 才能听你说"
+                : "Let Mira hear you — tap to allow"}
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Match CTA — subtle, lower-left */}
       <button
@@ -196,7 +260,7 @@ export default function Chat() {
         </button>
       </div>
 
-      {error && state !== "listening" && state !== "hearing" && state !== "speaking" && (
+      {error && state !== "listening" && state !== "hearing" && state !== "speaking" && !micPrompt && (
         <div className="pointer-events-none fixed bottom-6 left-6 max-w-sm rounded-lg border border-red-500/25 bg-red-950/40 px-3 py-2 text-xs text-red-200/80 backdrop-blur">
           {error}
         </div>
@@ -207,7 +271,7 @@ export default function Chat() {
 
 function StatusPill({ state, locale }: { state: ChatState; locale: "en" | "zh" }) {
   const labels: Record<ChatState, { icon: string; en: string; zh: string }> = {
-    connecting: { icon: "🌙", en: "connecting", zh: "连接中" },
+    connecting: { icon: "🌙", en: "arriving", zh: "正在到来" },
     reconnecting: { icon: "🔌", en: "reconnecting…", zh: "重新连接中…" },
     "mic-denied": { icon: "🔇", en: "mic blocked — type", zh: "麦克风未开 · 请用文字" },
     error: { icon: "⚠️", en: "connection issue", zh: "连接不稳" },
@@ -223,7 +287,7 @@ function StatusPill({ state, locale }: { state: ChatState; locale: "en" | "zh" }
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 0.6, y: 0 }}
       className="fixed left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.15em] text-white/60 backdrop-blur"
-    style={{ top: "max(1rem, calc(env(safe-area-inset-top) + 0.5rem))" }}
+      style={{ top: "max(1rem, calc(env(safe-area-inset-top) + 0.5rem))" }}
     >
       <span className="text-sm">{l.icon}</span>
       {(locale === "zh" ? l.zh : l.en) && <span>{locale === "zh" ? l.zh : l.en}</span>}

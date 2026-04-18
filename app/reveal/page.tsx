@@ -112,7 +112,7 @@ export default function Reveal() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6, delay: 0.3 }}
-            onClick={() => router.push("/encounter")}
+            onClick={() => router.push("/chat")}
             className="mt-8 rounded-full border border-white/30 px-6 py-2 text-sm uppercase tracking-[0.25em] text-white/80 transition hover:border-white/60 hover:text-white"
           >
             {t("continue")}
