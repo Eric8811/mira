@@ -51,7 +51,7 @@ const INPUT_SAMPLE_RATE = 16_000;
 const INPUT_CHUNK_SAMPLES = 1_600; // ~100ms at 16 kHz
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const HISTORY_WINDOW_MS = 5 * 60_000; // 5 minutes
-const NOISE_GATE_RMS = 0.012; // raised from 0.006 to cut speaker-leak echo loops on laptop speakers
+const NOISE_GATE_RMS = 0.006; // absolute silence floor; speech is typically ≥0.02
 const OUTPUT_GAIN = 0.6; // attenuate Mira's playback so speaker-pickup amplitude stays under AEC threshold
 const MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -233,9 +233,9 @@ export class RealtimeSession {
         turn_detection: cfg.turnDetection
           ? {
               type: "server_vad",
-              threshold: 0.65,
-              prefix_padding_ms: 250,
-              silence_duration_ms: 200,
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 300,
               create_response: true,
               interrupt_response: true,
             }
@@ -342,33 +342,16 @@ export class RealtimeSession {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia unavailable");
     if (this.captureRunning) return;
 
-    // Aggressive AEC config for laptop-speaker scenarios (no headphones).
-    // - echoCancellation + noiseSuppression: stock WebRTC DSP
-    // - autoGainControl OFF: AGC causes level pumping which confuses VAD and
-    //   makes speaker leak sound louder during silences
-    // - latency: 0 asks the stack for its lowest-latency capture path
-    // - goog* flags: legacy Chromium hints — silently ignored elsewhere
-    const audioConstraints: MediaTrackConstraints & Record<string, unknown> = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: false,
-      channelCount: 1,
-      sampleRate: INPUT_SAMPLE_RATE,
-      sampleSize: 16,
-      latency: 0,
-      googEchoCancellation: true,
-      googEchoCancellation2: true,
-      googAutoGainControl: false,
-      googNoiseSuppression: true,
-      googHighpassFilter: true,
-      googTypingNoiseDetection: true,
-      googAudioMirroring: false,
-      googDAEchoCancellation: true,
-      mozAutoGainControl: false,
-      mozNoiseSuppression: true,
-    };
-
-    this.inStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+    // Standard WebRTC DSP. We keep AGC ON — without it, the raw mic signal on
+    // laptops is so quiet that our client-side RMS gate + server VAD both miss speech.
+    this.inStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      },
+    });
 
     const AudioCtx =
       (window.AudioContext as typeof AudioContext | undefined) ??
