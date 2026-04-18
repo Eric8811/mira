@@ -2,17 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
 import { motion } from "framer-motion";
 import { MiraCharacter } from "@/components/MiraCharacter";
 import { ARCHETYPE_META, type Archetype } from "@/lib/archetype-map";
 import { loadSession, type MiraSession } from "@/lib/session";
 import { useLocale } from "@/components/I18nProvider";
+import { speakFallback, type FallbackTTSHandle } from "@/lib/tts-fallback";
 
 type Status = "loading" | "speaking" | "ready";
 
 export default function Encounter() {
-  const tChat = useTranslations("chat");
   const { locale } = useLocale();
   const router = useRouter();
 
@@ -22,6 +21,7 @@ export default function Encounter() {
   const [status, setStatus] = useState<Status>("loading");
   const [source, setSource] = useState<"qwen" | "fallback" | null>(null);
   const requestedRef = useRef(false);
+  const ttsRef = useRef<FallbackTTSHandle | null>(null);
 
   useEffect(() => {
     const s = loadSession();
@@ -50,11 +50,20 @@ export default function Encounter() {
         setStatus("ready");
       }
     })();
+
+    return () => {
+      ttsRef.current?.cancel();
+    };
   }, [router]);
 
-  // Typewriter reveal of the text
+  // Typewriter + speechSynthesis start together
   useEffect(() => {
-    if (!text) return;
+    if (!text || !session) return;
+
+    ttsRef.current = speakFallback(text, session.locale, {
+      onError: (e) => console.warn("[tts fallback]", e.message),
+    });
+
     let i = 0;
     const id = setInterval(() => {
       i += 1;
@@ -65,7 +74,7 @@ export default function Encounter() {
       }
     }, 35);
     return () => clearInterval(id);
-  }, [text]);
+  }, [text, session]);
 
   if (!session) return null;
 
@@ -90,7 +99,7 @@ export default function Encounter() {
           className="min-h-[10rem] w-full rounded-2xl border border-white/10 bg-black/30 px-8 py-6 text-center text-lg leading-relaxed text-white/90 backdrop-blur md:text-xl"
         >
           {status === "loading" && (
-            <span className="text-white/50">{locale === "zh" ? "…" : "…"}</span>
+            <span className="text-white/50">…</span>
           )}
           {displayed && (
             <span className="font-serif-display italic text-white">
@@ -102,13 +111,22 @@ export default function Encounter() {
 
         {status === "ready" && (
           <motion.button
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6 }}
-            onClick={() => router.push("/chat")}
-            className="rounded-full border border-[var(--mira-accent)]/60 bg-[var(--mira-accent)]/10 px-8 py-3 text-sm font-medium uppercase tracking-[0.25em] text-[var(--mira-accent)] transition hover:bg-[var(--mira-accent)]/20"
+            onClick={() => {
+              ttsRef.current?.cancel();
+              router.push("/chat");
+            }}
+            className="group relative flex h-16 w-16 items-center justify-center rounded-full border border-[var(--mira-accent)]/50 bg-[var(--mira-accent)]/10 text-2xl text-[var(--mira-accent)] transition hover:bg-[var(--mira-accent)]/25"
+            aria-label={locale === "zh" ? "开始对话" : "Start conversation"}
           >
-            {locale === "zh" ? "开始说" : "Speak"}
+            <span
+              className="absolute inset-0 rounded-full border border-[var(--mira-accent)]/40"
+              style={{ animation: "mira-breathe 2.4s ease-in-out infinite" }}
+              aria-hidden
+            />
+            💬
           </motion.button>
         )}
 
@@ -117,8 +135,14 @@ export default function Encounter() {
             {locale === "zh" ? "离线演示文本" : "offline demo text"}
           </p>
         )}
-        <p className="sr-only">{tChat("holdPlaceholder")}</p>
       </div>
+
+      <style jsx global>{`
+        @keyframes mira-breathe {
+          0%, 100% { transform: scale(1); opacity: 0.6; }
+          50% { transform: scale(1.25); opacity: 0.1; }
+        }
+      `}</style>
     </main>
   );
 }
