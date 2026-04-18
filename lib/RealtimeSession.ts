@@ -47,6 +47,7 @@ registerProcessor("mira-pcm-capture", MiraPCMCapture);`;
 export class RealtimeSession {
   private ws: WebSocket | null = null;
   private outCtx: AudioContext | null = null;
+  private outAnalyser: AnalyserNode | null = null;
   private inCtx: AudioContext | null = null;
   private inStream: MediaStream | null = null;
   private inWorklet: AudioWorkletNode | null = null;
@@ -75,6 +76,12 @@ export class RealtimeSession {
       await this.outCtx.resume();
     } catch {}
     this.nextPlayTime = this.outCtx.currentTime;
+
+    // Analyser lets the UI pulse to Mira's voice in real time.
+    this.outAnalyser = this.outCtx.createAnalyser();
+    this.outAnalyser.fftSize = 512;
+    this.outAnalyser.smoothingTimeConstant = 0.5;
+    this.outAnalyser.connect(this.outCtx.destination);
 
     this.ws = new WebSocket(config.proxyUrl);
     await new Promise<void>((resolve, reject) => {
@@ -341,10 +348,14 @@ export class RealtimeSession {
     }
     const src = this.outCtx.createBufferSource();
     src.buffer = buffer;
-    src.connect(this.outCtx.destination);
+    src.connect(this.outAnalyser ?? this.outCtx.destination);
     const startAt = Math.max(this.outCtx.currentTime, this.nextPlayTime);
     src.start(startAt);
     this.nextPlayTime = startAt + buffer.duration;
+  }
+
+  getOutputAnalyser(): AnalyserNode | null {
+    return this.outAnalyser;
   }
 }
 

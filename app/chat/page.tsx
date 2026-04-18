@@ -19,8 +19,6 @@ type ChatState =
   | "thinking"
   | "speaking";
 
-type Turn = { role: "user" | "mira"; text: string };
-
 export default function Chat() {
   const { locale } = useLocale();
   const router = useRouter();
@@ -28,14 +26,16 @@ export default function Chat() {
   const [session, setSession] = useState<MiraSession | null>(null);
   const [state, setState] = useState<ChatState>("connecting");
   const [error, setError] = useState<string | null>(null);
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [liveDelta, setLiveDelta] = useState("");
+  const [currentLine, setCurrentLine] = useState("");
+  const [lineVisible, setLineVisible] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [typed, setTyped] = useState("");
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
   const rtRef = useRef<RealtimeSession | null>(null);
   const startedRef = useRef(false);
   const deltaBufferRef = useRef("");
+  const fadeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const s = loadSession();
@@ -49,26 +49,32 @@ export default function Chat() {
     startedRef.current = true;
 
     const rt = new RealtimeSession({
-      onUserSpeechStarted: () => setState("hearing"),
-      onUserSpeechStopped: () => setState("thinking"),
-      onUserTranscript: (text) => {
-        setTurns((prev) => [...prev, { role: "user", text }]);
+      onUserSpeechStarted: () => {
+        setState("hearing");
+        // Clear any lingering Mira line when user starts speaking
+        setLineVisible(false);
       },
-      onAudioStart: () => setState("speaking"),
+      onUserSpeechStopped: () => setState("thinking"),
+      onAudioStart: () => {
+        setState("speaking");
+        deltaBufferRef.current = "";
+        setCurrentLine("");
+        setLineVisible(true);
+      },
       onAssistantTranscriptDelta: (delta) => {
         deltaBufferRef.current += delta;
-        setLiveDelta(deltaBufferRef.current);
+        setCurrentLine(deltaBufferRef.current);
       },
       onAssistantTranscriptDone: (full) => {
-        const final = full || deltaBufferRef.current;
-        if (final) {
-          setTurns((prev) => [...prev, { role: "mira", text: final }]);
-        }
-        deltaBufferRef.current = "";
-        setLiveDelta("");
+        if (full) setCurrentLine(full);
       },
       onResponseDone: () => {
         setState("listening");
+        // Let the final line linger briefly, then fade out
+        if (fadeTimerRef.current) window.clearTimeout(fadeTimerRef.current);
+        fadeTimerRef.current = window.setTimeout(() => {
+          setLineVisible(false);
+        }, 2600);
       },
       onError: (err) => {
         console.warn("[chat realtime error]", err.message);
@@ -88,6 +94,7 @@ export default function Chat() {
           voice: "Cherry",
           turnDetection: true,
         });
+        setAnalyser(rt.getOutputAnalyser());
       } catch (e) {
         console.error("[chat] ws connect failed", e);
         setState("error");
@@ -106,6 +113,7 @@ export default function Chat() {
     })();
 
     return () => {
+      if (fadeTimerRef.current) window.clearTimeout(fadeTimerRef.current);
       rtRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,33 +123,52 @@ export default function Chat() {
     const text = typed.trim();
     if (!text || !rtRef.current) return;
     rtRef.current.sendUserText(text);
-    setTurns((prev) => [...prev, { role: "user", text }]);
     setTyped("");
     setState("thinking");
+    setLineVisible(false);
   }, [typed]);
 
   if (!session) return null;
   const archetype: Archetype = session.archetype;
   const meta = ARCHETYPE_META[archetype];
 
-  const isMiraActive = state === "speaking" || state === "thinking";
-
   return (
     <main
-      className="mira-stars relative flex min-h-screen flex-col items-center justify-between px-8 py-12"
+      className="mira-stars relative flex min-h-screen flex-col items-center justify-center px-8 py-12"
       style={{
         background: `radial-gradient(ellipse at center, ${meta.background} 0%, #0B0618 80%)`,
       }}
     >
       <StatusPill state={state} locale={locale} />
 
-      <div className="relative z-10 flex flex-1 flex-col items-center justify-center gap-8 py-8">
-        <MiraCharacter archetype={archetype} state={isMiraActive ? "speaking" : "idle"} size={220} />
+      <div className="relative z-10 flex flex-1 flex-col items-center justify-center gap-10">
+        <MiraCharacter
+          archetype={archetype}
+          state={state === "speaking" ? "speaking" : "idle"}
+          size={240}
+          analyser={analyser}
+        />
 
-        <TranscriptStack turns={turns} liveDelta={liveDelta} locale={locale} />
+        {/* Single-line whisper of what Mira is saying right now, fades in/out */}
+        <div className="relative min-h-[4rem] w-full max-w-xl">
+          <AnimatePresence mode="wait">
+            {lineVisible && currentLine && (
+              <motion.p
+                key="mira-line"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 0.8, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 1.2, ease: "easeOut" }}
+                className="px-4 text-center font-serif-display text-xl italic leading-relaxed text-white/80 md:text-2xl"
+              >
+                {currentLine}
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
-      {/* Keyboard icon + input */}
+      {/* Keyboard fallback */}
       <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
         <AnimatePresence>
           {keyboardOpen && (
@@ -149,7 +176,7 @@ export default function Chat() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}
-              className="flex w-80 items-center gap-2 rounded-full border border-white/20 bg-black/70 p-2 backdrop-blur"
+              className="flex w-80 items-center gap-2 rounded-full border border-white/15 bg-black/70 p-2 backdrop-blur"
             >
               <input
                 type="text"
@@ -180,7 +207,7 @@ export default function Chat() {
 
         <button
           onClick={() => setKeyboardOpen((v) => !v)}
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-black/40 text-lg backdrop-blur transition hover:border-white/40"
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/30 text-lg backdrop-blur transition hover:border-white/30"
           aria-label={locale === "zh" ? "键盘输入" : "Keyboard input"}
         >
           ⌨️
@@ -188,7 +215,7 @@ export default function Chat() {
       </div>
 
       {error && state !== "listening" && state !== "hearing" && state !== "speaking" && (
-        <div className="pointer-events-none fixed bottom-6 left-6 max-w-sm rounded-lg border border-red-500/30 bg-red-950/60 px-3 py-2 text-xs text-red-200 backdrop-blur">
+        <div className="pointer-events-none fixed bottom-6 left-6 max-w-sm rounded-lg border border-red-500/25 bg-red-950/40 px-3 py-2 text-xs text-red-200/80 backdrop-blur">
           {error}
         </div>
       )}
@@ -198,74 +225,24 @@ export default function Chat() {
 
 function StatusPill({ state, locale }: { state: ChatState; locale: "en" | "zh" }) {
   const labels: Record<ChatState, { icon: string; en: string; zh: string }> = {
-    connecting: { icon: "🌙", en: "Connecting…", zh: "连接中…" },
-    "mic-denied": { icon: "🔇", en: "Microphone blocked — type instead", zh: "麦克风未授权——请用文字" },
-    error: { icon: "⚠️", en: "Connection issue", zh: "连接不稳" },
-    listening: { icon: "🎙️", en: "I'm listening", zh: "在听你说" },
-    hearing: { icon: "🎤", en: "Hearing you", zh: "听着呢" },
+    connecting: { icon: "🌙", en: "connecting", zh: "连接中" },
+    "mic-denied": { icon: "🔇", en: "mic blocked — type", zh: "麦克风未开 · 请用文字" },
+    error: { icon: "⚠️", en: "connection issue", zh: "连接不稳" },
+    listening: { icon: "🎙️", en: "listening", zh: "在听" },
+    hearing: { icon: "🎤", en: "hearing you", zh: "听着呢" },
     thinking: { icon: "💭", en: "…", zh: "…" },
-    speaking: { icon: "🌌", en: "Speaking", zh: "说话中" },
+    speaking: { icon: "🌌", en: "", zh: "" },
   };
   const l = labels[state];
   return (
     <motion.div
       key={state}
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="relative z-10 flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-sm text-white/80 backdrop-blur"
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 0.6, y: 0 }}
+      className="fixed top-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.15em] text-white/60 backdrop-blur"
     >
-      <span>{l.icon}</span>
-      <span>{locale === "zh" ? l.zh : l.en}</span>
+      <span className="text-sm">{l.icon}</span>
+      {(locale === "zh" ? l.zh : l.en) && <span>{locale === "zh" ? l.zh : l.en}</span>}
     </motion.div>
-  );
-}
-
-function TranscriptStack({
-  turns,
-  liveDelta,
-  locale,
-}: {
-  turns: Turn[];
-  liveDelta: string;
-  locale: "en" | "zh";
-}) {
-  const recent = turns.slice(-4);
-  return (
-    <div className="flex w-full max-w-2xl flex-col items-center gap-3">
-      {recent.map((t, i) => (
-        <motion.div
-          key={`${i}-${t.role}`}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: i === recent.length - 1 ? 1 : 0.5, y: 0 }}
-          className={`w-full rounded-2xl px-6 py-3 text-center text-base leading-relaxed backdrop-blur md:text-lg ${
-            t.role === "mira"
-              ? "border border-white/10 bg-black/30 font-serif-display italic text-white"
-              : "border border-white/5 bg-white/5 text-white/70"
-          }`}
-        >
-          {t.role === "user" && (
-            <span className="mr-2 text-xs uppercase tracking-widest text-white/40">
-              {locale === "zh" ? "你" : "you"}
-            </span>
-          )}
-          {t.text}
-        </motion.div>
-      ))}
-      {liveDelta && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="w-full rounded-2xl border border-white/10 bg-black/30 px-6 py-3 text-center font-serif-display text-base italic leading-relaxed text-white backdrop-blur md:text-lg"
-        >
-          {liveDelta}
-          <span className="ml-1 inline-block w-2 animate-pulse">▍</span>
-        </motion.div>
-      )}
-      {!turns.length && !liveDelta && (
-        <p className="text-sm text-white/30">
-          {locale === "zh" ? "随便说点什么，ta 会接得住。" : "Say something. She'll catch it."}
-        </p>
-      )}
-    </div>
   );
 }
