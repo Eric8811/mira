@@ -1,11 +1,11 @@
 export type Message = { role: "system" | "user" | "assistant"; content: string };
 
-const GLM_BASE = "https://open.bigmodel.cn/api/paas/v4";
+const GLM_BASE = process.env.GLM_VOICE_ENDPOINT?.replace(/\/$/, "") || "https://api.z.ai/api/paas/v4";
 
 export async function glmChat(
   messages: Message[],
   systemPrompt: string,
-  opts: { temperature?: number; maxTokens?: number } = {},
+  opts: { temperature?: number; maxTokens?: number; model?: string } = {},
 ) {
   const apiKey = process.env.ZAI_API_KEY_1;
   if (!apiKey) throw new Error("ZAI_API_KEY_1 is not set");
@@ -17,7 +17,7 @@ export async function glmChat(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "glm-4-flash",
+      model: opts.model ?? "glm-4-flash",
       messages: [{ role: "system", content: systemPrompt }, ...messages],
       temperature: opts.temperature ?? 0.8,
       max_tokens: opts.maxTokens ?? 300,
