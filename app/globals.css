@@ -8,7 +8,20 @@
   --mira-accent: #D4AF37;
   --mira-text: #F5EFE6;
   --mira-text-dim: rgba(245, 239, 230, 0.65);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* Prevent mobile Safari from zooming on focused inputs (< 16px triggers zoom). */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Use full viewport on mobile (handle the keyboard collapsing browser chrome). */
+html, body { height: 100%; }
+body { min-height: 100dvh; }
 
 html,
 body {

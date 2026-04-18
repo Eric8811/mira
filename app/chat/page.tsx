@@ -9,6 +9,7 @@ import { loadSession, type MiraSession } from "@/lib/session";
 import { useLocale } from "@/components/I18nProvider";
 import { RealtimeSession } from "@/lib/RealtimeSession";
 import { buildRealtimeInstructions, WS_PROXY_URL } from "@/lib/realtime-config";
+import { useResponsiveSize } from "@/lib/useResponsiveSize";
 
 type ChatState =
   | "connecting"
@@ -111,15 +112,19 @@ export default function Chat() {
     setState("thinking");
   }, [typed]);
 
+  const charSize = useResponsiveSize(180, 260);
+
   if (!session) return null;
   const archetype: Archetype = session.archetype;
   const meta = ARCHETYPE_META[archetype];
 
   return (
     <main
-      className="mira-stars relative flex min-h-screen flex-col items-center justify-center px-8 py-12"
+      className="mira-stars relative flex min-h-[100dvh] flex-col items-center justify-center px-6 py-10 sm:px-8 sm:py-12"
       style={{
         background: `radial-gradient(ellipse at center, ${meta.background} 0%, #0B0618 80%)`,
+        paddingTop: "max(2.5rem, env(safe-area-inset-top))",
+        paddingBottom: "max(4rem, env(safe-area-inset-bottom))",
       }}
     >
       <StatusPill state={state} locale={locale} />
@@ -128,7 +133,7 @@ export default function Chat() {
         <MiraCharacter
           archetype={archetype}
           state={state === "speaking" ? "speaking" : "idle"}
-          size={260}
+          size={charSize}
           analyser={analyser}
         />
       </div>
@@ -136,20 +141,24 @@ export default function Chat() {
       {/* Match CTA — subtle, lower-left */}
       <button
         onClick={() => router.push("/match")}
-        className="fixed bottom-6 left-6 z-30 rounded-full border border-white/10 bg-black/30 px-4 py-2 text-xs uppercase tracking-[0.25em] text-white/60 backdrop-blur transition hover:border-white/30 hover:text-white/90"
+        className="fixed left-4 z-30 rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-[10px] uppercase tracking-[0.25em] text-white/60 backdrop-blur transition hover:border-white/30 hover:text-white/90 sm:left-6 sm:px-4 sm:py-2 sm:text-xs"
+        style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
       >
         {locale === "zh" ? "✦ 合盘" : "✦ read a match"}
       </button>
 
       {/* Keyboard fallback */}
-      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2">
+      <div
+        className="fixed right-4 z-40 flex flex-col items-end gap-2 sm:right-6"
+        style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
+      >
         <AnimatePresence>
           {keyboardOpen && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}
-              className="flex w-80 items-center gap-2 rounded-full border border-white/15 bg-black/70 p-2 backdrop-blur"
+              className="flex w-[min(20rem,calc(100vw-2rem))] items-center gap-2 rounded-full border border-white/15 bg-black/70 p-2 backdrop-blur"
             >
               <input
                 type="text"
@@ -213,7 +222,8 @@ function StatusPill({ state, locale }: { state: ChatState; locale: "en" | "zh" }
       key={state}
       initial={{ opacity: 0, y: -4 }}
       animate={{ opacity: 0.6, y: 0 }}
-      className="fixed top-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.15em] text-white/60 backdrop-blur"
+      className="fixed left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.15em] text-white/60 backdrop-blur"
+    style={{ top: "max(1rem, calc(env(safe-area-inset-top) + 0.5rem))" }}
     >
       <span className="text-sm">{l.icon}</span>
       {(locale === "zh" ? l.zh : l.en) && <span>{locale === "zh" ? l.zh : l.en}</span>}

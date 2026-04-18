@@ -21,6 +21,7 @@ import {
   compatibilityStars,
   type MatchSubject,
 } from "@/lib/match-prompts";
+import { useIsMobile, useResponsiveSize } from "@/lib/useResponsiveSize";
 
 type Phase = "form" | "reading" | "done";
 
@@ -139,17 +140,26 @@ export default function Match() {
     rtRef.current.triggerResponse(buildMatchTrigger(locale));
   }
 
+  const charSize = useResponsiveSize(140, 200);
+  const isMobile = useIsMobile();
+
   if (!session) return null;
 
   if (phase === "form") {
     return (
-      <main className="mira-stars relative flex min-h-screen items-center justify-center px-8 py-16">
+      <main
+        className="mira-stars relative flex min-h-[100dvh] items-center justify-center px-6 py-10 sm:px-8 sm:py-16"
+        style={{
+          paddingTop: "max(2.5rem, env(safe-area-inset-top))",
+          paddingBottom: "max(2.5rem, env(safe-area-inset-bottom))",
+        }}
+      >
         <motion.form
           onSubmit={onSubmit}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
-          className="relative z-10 w-full max-w-lg space-y-8"
+          className="relative z-10 w-full max-w-lg space-y-6 sm:space-y-8"
         >
           <h1 className="font-serif-display text-center text-3xl font-medium leading-snug md:text-4xl">
             {t("heading")}
@@ -256,32 +266,97 @@ export default function Match() {
   const otherMeta = subject ? ARCHETYPE_META[subject.archetype] : userMeta;
   const stars = subject ? compatibilityStars(session.archetype, subject.archetype) : 4;
 
+  const lineSvg = isMobile ? (
+    <svg viewBox="0 0 200 200" className="h-28 w-12" aria-hidden>
+      <defs>
+        <linearGradient id="match-line-v" x1="50%" y1="0%" x2="50%" y2="100%">
+          <stop offset="0%" stopColor={userMeta.accent} stopOpacity="0.8" />
+          <stop offset="50%" stopColor="#fff" stopOpacity="1" />
+          <stop offset="100%" stopColor={otherMeta.accent} stopOpacity="0.8" />
+        </linearGradient>
+      </defs>
+      <motion.path
+        d="M 100 0 Q 60 100 100 200"
+        stroke="url(#match-line-v)"
+        strokeWidth="2"
+        fill="none"
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 1 }}
+        transition={{ duration: 1.8, ease: "easeOut" }}
+      />
+      <motion.path
+        d="M 100 0 Q 140 100 100 200"
+        stroke="url(#match-line-v)"
+        strokeWidth="1"
+        fill="none"
+        strokeDasharray="3 6"
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 0.6 }}
+        transition={{ duration: 2.2, ease: "easeOut", delay: 0.3 }}
+      />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 200 200" className="absolute inset-0 h-full w-full" aria-hidden>
+      <defs>
+        <linearGradient id="match-line" x1="0%" y1="50%" x2="100%" y2="50%">
+          <stop offset="0%" stopColor={userMeta.accent} stopOpacity="0.8" />
+          <stop offset="50%" stopColor="#fff" stopOpacity="1" />
+          <stop offset="100%" stopColor={otherMeta.accent} stopOpacity="0.8" />
+        </linearGradient>
+      </defs>
+      <motion.path
+        d="M 0 100 Q 100 60 200 100"
+        stroke="url(#match-line)"
+        strokeWidth="1.5"
+        fill="none"
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 1 }}
+        transition={{ duration: 1.8, ease: "easeOut" }}
+      />
+      <motion.path
+        d="M 0 100 Q 100 140 200 100"
+        stroke="url(#match-line)"
+        strokeWidth="1"
+        fill="none"
+        strokeDasharray="3 6"
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 0.6 }}
+        transition={{ duration: 2.2, ease: "easeOut", delay: 0.3 }}
+      />
+    </svg>
+  );
+
   return (
     <main
-      className="mira-stars relative flex min-h-screen flex-col items-center justify-center px-8 py-12"
+      className="mira-stars relative flex min-h-[100dvh] flex-col items-center justify-center px-6 py-12 sm:px-8"
       style={{
         background: `linear-gradient(135deg, ${userMeta.background}88 0%, #0B0618 50%, ${otherMeta.background}88 100%)`,
+        paddingTop: "max(4rem, env(safe-area-inset-top))",
+        paddingBottom: "max(5rem, env(safe-area-inset-bottom))",
       }}
     >
       {/* compatibility stars */}
-      <div className="fixed top-8 left-1/2 z-10 -translate-x-1/2 text-lg tracking-[0.4em] text-[var(--mira-accent)]/80">
+      <div
+        className="fixed left-1/2 z-10 -translate-x-1/2 text-base tracking-[0.4em] text-[var(--mira-accent)]/80 sm:text-lg"
+        style={{ top: "max(1.5rem, calc(env(safe-area-inset-top) + 0.5rem))" }}
+      >
         {"★".repeat(stars)}
         <span className="text-white/15">{"★".repeat(5 - stars)}</span>
       </div>
 
-      <div className="relative z-10 flex w-full max-w-5xl items-center justify-between gap-6 md:gap-16">
+      <div className="relative z-10 flex w-full max-w-5xl flex-col items-center justify-between gap-2 md:flex-row md:gap-16">
         {/* User side */}
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
+          initial={{ opacity: 0, x: isMobile ? 0 : -20, y: isMobile ? -20 : 0 }}
+          animate={{ opacity: 1, x: 0, y: 0 }}
           transition={{ duration: 0.8 }}
           className="flex flex-1 flex-col items-center gap-3"
-          style={{ transform: "rotate(-2deg)" }}
+          style={{ transform: isMobile ? "rotate(-1deg)" : "rotate(-2deg)" }}
         >
           <MiraCharacter
             archetype={session.archetype}
             state={status === "speaking" ? "speaking" : "idle"}
-            size={200}
+            size={charSize}
             analyser={analyser}
           />
           <div className="text-center text-xs uppercase tracking-[0.3em] text-white/50">
@@ -290,50 +365,23 @@ export default function Match() {
         </motion.div>
 
         {/* Connection line */}
-        <div className="relative h-48 w-24 md:w-48">
-          <svg viewBox="0 0 200 200" className="absolute inset-0 h-full w-full" aria-hidden>
-            <defs>
-              <linearGradient id="match-line" x1="0%" y1="50%" x2="100%" y2="50%">
-                <stop offset="0%" stopColor={userMeta.accent} stopOpacity="0.8" />
-                <stop offset="50%" stopColor="#fff" stopOpacity="1" />
-                <stop offset="100%" stopColor={otherMeta.accent} stopOpacity="0.8" />
-              </linearGradient>
-            </defs>
-            <motion.path
-              d="M 0 100 Q 100 60 200 100"
-              stroke="url(#match-line)"
-              strokeWidth="1.5"
-              fill="none"
-              initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 1 }}
-              transition={{ duration: 1.8, ease: "easeOut" }}
-            />
-            <motion.path
-              d="M 0 100 Q 100 140 200 100"
-              stroke="url(#match-line)"
-              strokeWidth="1"
-              fill="none"
-              strokeDasharray="3 6"
-              initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 0.6 }}
-              transition={{ duration: 2.2, ease: "easeOut", delay: 0.3 }}
-            />
-          </svg>
+        <div className={isMobile ? "relative flex items-center justify-center" : "relative h-48 w-24 md:w-48"}>
+          {lineSvg}
         </div>
 
         {/* Other side */}
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
+          initial={{ opacity: 0, x: isMobile ? 0 : 20, y: isMobile ? 20 : 0 }}
+          animate={{ opacity: 1, x: 0, y: 0 }}
           transition={{ duration: 0.8, delay: 0.3 }}
           className="flex flex-1 flex-col items-center gap-3"
-          style={{ transform: "rotate(2deg)" }}
+          style={{ transform: isMobile ? "rotate(1deg)" : "rotate(2deg)" }}
         >
           {subject && (
             <MiraCharacter
               archetype={subject.archetype}
               state={status === "speaking" ? "speaking" : "idle"}
-              size={200}
+              size={charSize}
             />
           )}
           <div className="text-center text-xs uppercase tracking-[0.3em] text-white/50">
@@ -349,7 +397,8 @@ export default function Match() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="fixed bottom-8 flex gap-3"
+            className="fixed flex gap-3"
+            style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
           >
             <button
               onClick={replay}

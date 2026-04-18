@@ -8,6 +8,7 @@ import { ARCHETYPE_META, type Archetype } from "@/lib/archetype-map";
 import { loadSession, type MiraSession } from "@/lib/session";
 import { useLocale } from "@/components/I18nProvider";
 import { speakFallback, type FallbackTTSHandle } from "@/lib/tts-fallback";
+import { useResponsiveSize } from "@/lib/useResponsiveSize";
 import { RealtimeSession } from "@/lib/RealtimeSession";
 import {
   buildEncounterTrigger,
@@ -102,15 +103,19 @@ export default function Encounter() {
     }
   }
 
+  const charSize = useResponsiveSize(200, 260);
+
   if (!session) return null;
   const archetype: Archetype = session.archetype;
   const meta = ARCHETYPE_META[archetype];
 
   return (
     <main
-      className="mira-stars relative flex min-h-screen flex-col items-center justify-center px-8 py-12"
+      className="mira-stars relative flex min-h-[100dvh] flex-col items-center justify-center px-6 py-10 sm:px-8 sm:py-12"
       style={{
         background: `radial-gradient(ellipse at center, ${meta.background} 0%, #0B0618 80%)`,
+        paddingTop: "max(2.5rem, env(safe-area-inset-top))",
+        paddingBottom: "max(2.5rem, env(safe-area-inset-bottom))",
       }}
     >
       <StatusPill status={status} locale={locale} />
@@ -119,7 +124,7 @@ export default function Encounter() {
         <MiraCharacter
           archetype={archetype}
           state={status === "speaking" ? "speaking" : "idle"}
-          size={260}
+          size={charSize}
           analyser={analyser}
         />
       </div>
