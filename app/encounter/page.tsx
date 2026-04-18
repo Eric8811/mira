@@ -8,19 +8,28 @@ import { ARCHETYPE_META, type Archetype } from "@/lib/archetype-map";
 import { loadSession, type MiraSession } from "@/lib/session";
 import { useLocale } from "@/components/I18nProvider";
 import { speakFallback, type FallbackTTSHandle } from "@/lib/tts-fallback";
+import { RealtimeSession } from "@/lib/RealtimeSession";
+import {
+  buildEncounterTrigger,
+  buildRealtimeInstructions,
+  WS_PROXY_URL,
+} from "@/lib/realtime-config";
 
 type Status = "loading" | "speaking" | "ready";
+type Source = "realtime" | "fallback";
 
 export default function Encounter() {
   const { locale } = useLocale();
   const router = useRouter();
 
   const [session, setSession] = useState<MiraSession | null>(null);
-  const [text, setText] = useState("");
   const [displayed, setDisplayed] = useState("");
   const [status, setStatus] = useState<Status>("loading");
-  const [source, setSource] = useState<"qwen" | "fallback" | null>(null);
+  const [source, setSource] = useState<Source | null>(null);
+  const [errorNote, setErrorNote] = useState<string | null>(null);
+
   const requestedRef = useRef(false);
+  const rtRef = useRef<RealtimeSession | null>(null);
   const ttsRef = useRef<FallbackTTSHandle | null>(null);
 
   useEffect(() => {
@@ -36,48 +45,80 @@ export default function Encounter() {
 
     (async () => {
       try {
-        const res = await fetch("/api/encounter", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(s),
-        });
-        const data = (await res.json()) as { text: string; source: "qwen" | "fallback" };
-        setText(data.text);
-        setSource(data.source);
-        setStatus("speaking");
-      } catch (e) {
-        console.error("encounter fetch failed", e);
-        setStatus("ready");
+        await openRealtime(s);
+      } catch (err) {
+        console.warn("[encounter] realtime failed, falling back:", err);
+        setErrorNote((err as Error).message);
+        await openFallback(s);
       }
     })();
 
     return () => {
+      rtRef.current?.close();
       ttsRef.current?.cancel();
     };
-  }, [router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Typewriter + speechSynthesis start together
-  useEffect(() => {
-    if (!text || !session) return;
+  async function openRealtime(s: MiraSession) {
+    const rt = new RealtimeSession({
+      onAudioStart: () => setStatus("speaking"),
+      onTranscriptDelta: (delta) => setDisplayed((prev) => prev + delta),
+      onTranscriptDone: (full) => {
+        if (full) setDisplayed(full);
+      },
+      onResponseDone: () => setStatus("ready"),
+      onError: (err) => {
+        console.warn("[realtime] error event:", err.message);
+      },
+      onClose: (code, reason) => {
+        console.log("[realtime] close", code, reason);
+      },
+    });
+    rtRef.current = rt;
 
-    ttsRef.current = speakFallback(text, session.locale, {
-      onError: (e) => console.warn("[tts fallback]", e.message),
+    await rt.connect({
+      proxyUrl: WS_PROXY_URL,
+      instructions: buildRealtimeInstructions(s),
+      voice: "Cherry",
+      turnDetection: false,
     });
 
-    let i = 0;
-    const id = setInterval(() => {
-      i += 1;
-      setDisplayed(text.slice(0, i));
-      if (i >= text.length) {
-        clearInterval(id);
-        setTimeout(() => setStatus("ready"), 600);
-      }
-    }, 35);
-    return () => clearInterval(id);
-  }, [text, session]);
+    setSource("realtime");
+    rt.triggerResponse(buildEncounterTrigger(s));
+  }
+
+  async function openFallback(s: MiraSession) {
+    setSource("fallback");
+    try {
+      const res = await fetch("/api/encounter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(s),
+      });
+      const data = (await res.json()) as { text: string };
+      setStatus("speaking");
+
+      ttsRef.current = speakFallback(data.text, s.locale, {
+        onError: (e) => console.warn("[tts fallback]", e.message),
+      });
+
+      let i = 0;
+      const id = window.setInterval(() => {
+        i += 1;
+        setDisplayed(data.text.slice(0, i));
+        if (i >= data.text.length) {
+          clearInterval(id);
+          window.setTimeout(() => setStatus("ready"), 600);
+        }
+      }, 35);
+    } catch (e) {
+      console.error("[encounter] fallback failed", e);
+      setStatus("ready");
+    }
+  }
 
   if (!session) return null;
-
   const archetype: Archetype = session.archetype;
   const meta = ARCHETYPE_META[archetype];
   const isSpeaking = status === "speaking";
@@ -98,7 +139,7 @@ export default function Encounter() {
           transition={{ duration: 0.8 }}
           className="min-h-[10rem] w-full rounded-2xl border border-white/10 bg-black/30 px-8 py-6 text-center text-lg leading-relaxed text-white/90 backdrop-blur md:text-xl"
         >
-          {status === "loading" && (
+          {status === "loading" && !displayed && (
             <span className="text-white/50">…</span>
           )}
           {displayed && (
@@ -115,6 +156,7 @@ export default function Encounter() {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6 }}
             onClick={() => {
+              rtRef.current?.close();
               ttsRef.current?.cancel();
               router.push("/chat");
             }}
@@ -130,9 +172,16 @@ export default function Encounter() {
           </motion.button>
         )}
 
-        {source === "fallback" && (
-          <p className="text-xs text-white/30">
-            {locale === "zh" ? "离线演示文本" : "offline demo text"}
+        {source && (
+          <p className="text-xs text-white/25">
+            {source === "realtime"
+              ? locale === "zh"
+                ? "Mira 正在直接对你说话"
+                : "Mira is speaking to you directly"
+              : locale === "zh"
+                ? "离线演示声音"
+                : "offline fallback voice"}
+            {errorNote && source === "fallback" ? ` · ${errorNote}` : null}
           </p>
         )}
       </div>
