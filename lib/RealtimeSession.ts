@@ -51,7 +51,8 @@ const INPUT_SAMPLE_RATE = 16_000;
 const INPUT_CHUNK_SAMPLES = 1_600; // ~100ms at 16 kHz
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const HISTORY_WINDOW_MS = 5 * 60_000; // 5 minutes
-const NOISE_GATE_RMS = 0.006; // absolute silence floor; speech is typically ≥0.02
+const NOISE_GATE_RMS = 0.012; // raised from 0.006 to cut speaker-leak echo loops on laptop speakers
+const OUTPUT_GAIN = 0.6; // attenuate Mira's playback so speaker-pickup amplitude stays under AEC threshold
 const MAX_RECONNECT_ATTEMPTS = 5;
 
 const CAPTURE_WORKLET_SRC = `class MiraPCMCapture extends AudioWorkletProcessor {
@@ -69,6 +70,7 @@ export class RealtimeSession {
   private ws: WebSocket | null = null;
   private outCtx: AudioContext | null = null;
   private outAnalyser: AnalyserNode | null = null;
+  private outGain: GainNode | null = null;
   private inCtx: AudioContext | null = null;
   private inStream: MediaStream | null = null;
   private inWorklet: AudioWorkletNode | null = null;
@@ -106,12 +108,19 @@ export class RealtimeSession {
     if (!AudioCtx) throw new Error("AudioContext unavailable");
 
     if (!this.outCtx) {
-      this.outCtx = new AudioCtx({ sampleRate: 24_000 });
+      this.outCtx = new AudioCtx({ sampleRate: 24_000, latencyHint: "interactive" });
       try { await this.outCtx.resume(); } catch {}
       this.nextPlayTime = this.outCtx.currentTime;
+
+      // Output chain: src → outGain (0.6) → outAnalyser → destination
+      // - Reduced gain cuts echo leakage picked up by the mic (AEC has an easier job).
+      // - Analyser sits downstream so the orb pulses to what the user actually hears.
+      this.outGain = this.outCtx.createGain();
+      this.outGain.gain.value = OUTPUT_GAIN;
       this.outAnalyser = this.outCtx.createAnalyser();
       this.outAnalyser.fftSize = 512;
       this.outAnalyser.smoothingTimeConstant = 0.5;
+      this.outGain.connect(this.outAnalyser);
       this.outAnalyser.connect(this.outCtx.destination);
     }
 
@@ -224,9 +233,9 @@ export class RealtimeSession {
         turn_detection: cfg.turnDetection
           ? {
               type: "server_vad",
-              threshold: 0.55,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 350,
+              threshold: 0.65,
+              prefix_padding_ms: 250,
+              silence_duration_ms: 200,
               create_response: true,
               interrupt_response: true,
             }
@@ -333,14 +342,33 @@ export class RealtimeSession {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia unavailable");
     if (this.captureRunning) return;
 
-    this.inStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      },
-    });
+    // Aggressive AEC config for laptop-speaker scenarios (no headphones).
+    // - echoCancellation + noiseSuppression: stock WebRTC DSP
+    // - autoGainControl OFF: AGC causes level pumping which confuses VAD and
+    //   makes speaker leak sound louder during silences
+    // - latency: 0 asks the stack for its lowest-latency capture path
+    // - goog* flags: legacy Chromium hints — silently ignored elsewhere
+    const audioConstraints: MediaTrackConstraints & Record<string, unknown> = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: false,
+      channelCount: 1,
+      sampleRate: INPUT_SAMPLE_RATE,
+      sampleSize: 16,
+      latency: 0,
+      googEchoCancellation: true,
+      googEchoCancellation2: true,
+      googAutoGainControl: false,
+      googNoiseSuppression: true,
+      googHighpassFilter: true,
+      googTypingNoiseDetection: true,
+      googAudioMirroring: false,
+      googDAEchoCancellation: true,
+      mozAutoGainControl: false,
+      mozNoiseSuppression: true,
+    };
+
+    this.inStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
 
     const AudioCtx =
       (window.AudioContext as typeof AudioContext | undefined) ??
@@ -424,6 +452,7 @@ export class RealtimeSession {
     try { this.outCtx?.close(); } catch {}
     this.outCtx = null;
     this.outAnalyser = null;
+    this.outGain = null;
   }
 
   private sendAudioChunk(float32: Float32Array) {
@@ -459,11 +488,13 @@ export class RealtimeSession {
         break;
 
       case "input_audio_buffer.speech_started":
+        console.log(`[mira] ← speech_started @ ${Math.round(performance.now())}`);
         this.clearResponseWatchdog();
         this.interruptPlayback();
         this.events.onUserSpeechStarted?.();
         break;
       case "input_audio_buffer.speech_stopped":
+        console.log(`[mira] ← speech_stopped @ ${Math.round(performance.now())}`);
         this.armResponseWatchdog();
         this.events.onUserSpeechStopped?.();
         break;
@@ -482,6 +513,7 @@ export class RealtimeSession {
           this.clearResponseWatchdog();
           if (!this.firstAudioEmitted) {
             this.firstAudioEmitted = true;
+            console.log(`[mira] ← first audio.delta @ ${Math.round(performance.now())}`);
             this.events.onAudioStart?.();
           }
           this.playAudioChunk(delta);
@@ -527,9 +559,13 @@ export class RealtimeSession {
     }
     const src = this.outCtx.createBufferSource();
     src.buffer = buffer;
-    src.connect(this.outAnalyser ?? this.outCtx.destination);
+    // Route through outGain so Mira's playback is attenuated before hitting the speakers.
+    src.connect(this.outGain ?? this.outAnalyser ?? this.outCtx.destination);
     const startAt = Math.max(this.outCtx.currentTime, this.nextPlayTime);
     src.start(startAt);
+    if (this.activeSources.size === 0) {
+      console.log(`[mira] ▶ first chunk scheduled @ ${Math.round(performance.now())} (ctx+${(startAt - this.outCtx.currentTime).toFixed(3)}s)`);
+    }
     this.nextPlayTime = startAt + buffer.duration;
     this.activeSources.add(src);
     src.onended = () => this.activeSources.delete(src);
