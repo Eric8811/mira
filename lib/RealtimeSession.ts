@@ -92,6 +92,10 @@ export class RealtimeSession {
   private userRequestedClose = false;
   private responseWatchdog: number | null = null;
   private visibilityHandler: (() => void) | null = null;
+  // Server VAD needs a continuous frame stream to tick its silence timer. When we
+  // know the user is mid-utterance, stop gating silent frames — otherwise the tail
+  // of their sentence never triggers speech_stopped on the server.
+  private speechActive = false;
 
   constructor(events: RealtimeEvents) {
     this.events = events;
@@ -387,9 +391,10 @@ export class RealtimeSession {
           else this.pendingCapture[0] = head.subarray(take);
         }
         this.pendingCaptureLen -= INPUT_CHUNK_SAMPLES;
-        // Noise gate: skip chunks below threshold to avoid wasting bandwidth
-        // and to give server VAD cleaner silence boundaries.
-        if (rms(out) < NOISE_GATE_RMS) continue;
+        // Gate silent frames ONLY while idle (between turns).
+        // Once the server detects speech_started, keep streaming every frame —
+        // server VAD needs the silence tail to fire speech_stopped.
+        if (!this.speechActive && rms(out) < NOISE_GATE_RMS) continue;
         this.sendAudioChunk(out);
       }
     };
@@ -472,12 +477,14 @@ export class RealtimeSession {
 
       case "input_audio_buffer.speech_started":
         console.log(`[mira] ← speech_started @ ${Math.round(performance.now())}`);
+        this.speechActive = true;
         this.clearResponseWatchdog();
         this.interruptPlayback();
         this.events.onUserSpeechStarted?.();
         break;
       case "input_audio_buffer.speech_stopped":
         console.log(`[mira] ← speech_stopped @ ${Math.round(performance.now())}`);
+        this.speechActive = false;
         this.armResponseWatchdog();
         this.events.onUserSpeechStopped?.();
         break;
