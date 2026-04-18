@@ -1,7 +1,43 @@
 import type { MiraSession } from "./session";
 import { buildPersonalityProfile } from "./chart-translator";
+import type { HistoryTurn } from "./RealtimeSession";
 
 export const WS_PROXY_URL = "wss://mira-ws-proxy.zhongyuan425.workers.dev";
+
+// Appends the last 5 minutes of turns to the base instructions so that on
+// reconnect (or mid-session heartbeat), the model has contextual memory.
+// Bounded to ~2000 chars of recent history to stay within prompt budget.
+const MAX_HISTORY_CHARS = 2000;
+
+export function buildInstructionsWithHistory(
+  session: MiraSession,
+  history: HistoryTurn[],
+): string {
+  const base = buildRealtimeInstructions(session);
+  if (!history.length) return base;
+
+  // Keep most recent turns, truncate old ones if too long.
+  const entries: string[] = [];
+  let chars = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    const line =
+      session.locale === "zh"
+        ? `${h.role === "user" ? "用户" : "你"}: ${h.text}`
+        : `${h.role === "user" ? "User" : "You"}: ${h.text}`;
+    if (chars + line.length > MAX_HISTORY_CHARS) break;
+    entries.unshift(line);
+    chars += line.length;
+  }
+  if (!entries.length) return base;
+
+  const suffix =
+    session.locale === "zh"
+      ? `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n【最近的对话·保持上下文连贯】\n${entries.join("\n")}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n接下来的回应必须延续上面的对话。ta 说"刚才那个"、"对，就是这个"时，你要知道 ta 指的是什么。`
+      : `\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n【Recent conversation — keep context continuous】\n${entries.join("\n")}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nYour next reply must continue this conversation. When they say "that thing" or "yeah, that one", you know what they mean.`;
+
+  return base + suffix;
+}
 
 // Build instructions WITHOUT any Zi Wei / Chinese astrology terminology. The
 // underlying chart is pre-translated into personality prose so the LLM can't

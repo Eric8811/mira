@@ -1,6 +1,17 @@
 // Realtime session: browser ↔ Cloudflare Worker proxy ↔ DashScope Qwen3-Omni Realtime.
 // Owns the WebSocket, the output AudioContext (24 kHz playback), the input AudioContext
 // (16 kHz mic capture through an AudioWorklet), and event routing.
+//
+// Robustness:
+// - Tracks full conversation history client-side (user + assistant transcripts with timestamps).
+// - Every 20s sends a no-op session.update as a keepalive.
+// - On unexpected close, auto-reconnects with exponential backoff and replays recent history
+//   (last 5 min) into the instructions field. DashScope's conversation.item.create doesn't
+//   process text user turns reliably, so we fake memory via instructions.
+// - Noise-gate on the input path skips near-silent chunks to keep VAD from misfiring.
+
+import { buildInstructionsWithHistory } from "./realtime-config";
+import type { MiraSession } from "./session";
 
 export type RealtimeEvents = {
   onConnected?: () => void;
@@ -13,6 +24,8 @@ export type RealtimeEvents = {
   onUserTranscript?: (text: string) => void;
   onError?: (err: Error) => void;
   onClose?: (code: number, reason: string) => void;
+  onReconnecting?: (attempt: number) => void;
+  onReconnected?: () => void;
 };
 
 export type RealtimeConfig = {
@@ -20,6 +33,9 @@ export type RealtimeConfig = {
   instructions: string;
   voice?: string;
   turnDetection?: boolean;
+  // Optional: for reconnect-with-history replay. If provided, every reconnect
+  // will rebuild instructions from this session + the stored history.
+  miraSession?: MiraSession;
 };
 
 type PendingConnect = {
@@ -27,16 +43,20 @@ type PendingConnect = {
   reject: (e: Error) => void;
 };
 
+export type HistoryTurn = { role: "user" | "assistant"; text: string; ts: number };
+
 const CONNECT_TIMEOUT_MS = 10_000;
 const INPUT_SAMPLE_RATE = 16_000;
 const INPUT_CHUNK_SAMPLES = 1_600; // ~100ms at 16 kHz
+const HEARTBEAT_INTERVAL_MS = 20_000;
+const HISTORY_WINDOW_MS = 5 * 60_000; // 5 minutes
+const NOISE_GATE_RMS = 0.006; // absolute silence floor; speech is typically ≥0.02
+const MAX_RECONNECT_ATTEMPTS = 5;
 
-// Inline AudioWorklet that forwards Float32 mic buffers to the main thread.
 const CAPTURE_WORKLET_SRC = `class MiraPCMCapture extends AudioWorkletProcessor {
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
     if (ch && ch.length) {
-      // Clone: the view is reused each tick.
       this.port.postMessage(ch.slice(0));
     }
     return true;
@@ -60,6 +80,13 @@ export class RealtimeSession {
   private pendingCapture: Float32Array[] = [];
   private pendingCaptureLen = 0;
   private activeSources: Set<AudioBufferSourceNode> = new Set();
+  private history: HistoryTurn[] = [];
+  private config: RealtimeConfig | null = null;
+  private heartbeatTimer: number | null = null;
+  private reconnectAttempt = 0;
+  private reconnecting = false;
+  private captureRunning = false;
+  private userRequestedClose = false;
 
   constructor(events: RealtimeEvents) {
     this.events = events;
@@ -67,24 +94,33 @@ export class RealtimeSession {
 
   async connect(config: RealtimeConfig): Promise<void> {
     if (typeof window === "undefined") throw new Error("browser only");
+    this.config = config;
+    this.userRequestedClose = false;
 
     const AudioCtx =
       (window.AudioContext as typeof AudioContext | undefined) ??
       ((window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
     if (!AudioCtx) throw new Error("AudioContext unavailable");
-    this.outCtx = new AudioCtx({ sampleRate: 24_000 });
-    try {
-      await this.outCtx.resume();
-    } catch {}
-    this.nextPlayTime = this.outCtx.currentTime;
 
-    // Analyser lets the UI pulse to Mira's voice in real time.
-    this.outAnalyser = this.outCtx.createAnalyser();
-    this.outAnalyser.fftSize = 512;
-    this.outAnalyser.smoothingTimeConstant = 0.5;
-    this.outAnalyser.connect(this.outCtx.destination);
+    if (!this.outCtx) {
+      this.outCtx = new AudioCtx({ sampleRate: 24_000 });
+      try { await this.outCtx.resume(); } catch {}
+      this.nextPlayTime = this.outCtx.currentTime;
+      this.outAnalyser = this.outCtx.createAnalyser();
+      this.outAnalyser.fftSize = 512;
+      this.outAnalyser.smoothingTimeConstant = 0.5;
+      this.outAnalyser.connect(this.outCtx.destination);
+    }
 
-    this.ws = new WebSocket(config.proxyUrl);
+    await this.openWebSocket();
+    this.startHeartbeat();
+  }
+
+  private async openWebSocket() {
+    if (!this.config) throw new Error("no config");
+    const cfg = this.config;
+
+    this.ws = new WebSocket(cfg.proxyUrl);
     await new Promise<void>((resolve, reject) => {
       this.pendingConnect = { resolve, reject };
       const timer = window.setTimeout(() => {
@@ -102,7 +138,10 @@ export class RealtimeSession {
       };
       this.ws.onerror = () => {
         clearTimeout(timer);
-        reject(new Error("ws error during connect"));
+        if (this.pendingConnect) {
+          reject(new Error("ws error during connect"));
+          this.pendingConnect = null;
+        }
         this.events.onError?.(new Error("ws error"));
       };
       this.ws.onclose = (e) => {
@@ -112,6 +151,7 @@ export class RealtimeSession {
           this.pendingConnect = null;
         }
         this.events.onClose?.(e.code, e.reason);
+        this.handleUnexpectedClose();
       };
 
       const originalResolve = resolve;
@@ -122,20 +162,25 @@ export class RealtimeSession {
       };
     });
 
+    // Build instructions: if we have a session pointer, include recent history.
+    const instructions = cfg.miraSession
+      ? buildInstructionsWithHistory(cfg.miraSession, this.getRecentHistory())
+      : cfg.instructions;
+
     this.send({
       type: "session.update",
       session: {
-        instructions: config.instructions,
-        voice: config.voice ?? "Cherry",
+        instructions,
+        voice: cfg.voice ?? "Cherry",
         modalities: ["text", "audio"],
         input_audio_format: "pcm16",
         output_audio_format: "pcm24",
-        turn_detection: config.turnDetection
+        turn_detection: cfg.turnDetection
           ? {
               type: "server_vad",
-              threshold: 0.5,
+              threshold: 0.65,
               prefix_padding_ms: 300,
-              silence_duration_ms: 500,
+              silence_duration_ms: 600,
               create_response: true,
               interrupt_response: true,
             }
@@ -144,6 +189,65 @@ export class RealtimeSession {
     });
 
     this.events.onConnected?.();
+  }
+
+  private handleUnexpectedClose() {
+    if (this.userRequestedClose || this.closed) return;
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    this.stopHeartbeat();
+    this.attemptReconnect();
+  }
+
+  private attemptReconnect() {
+    this.reconnectAttempt += 1;
+    if (this.reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
+      this.reconnecting = false;
+      this.events.onError?.(new Error("reconnect exhausted"));
+      return;
+    }
+    this.events.onReconnecting?.(this.reconnectAttempt);
+    const delay = Math.min(500 * 2 ** (this.reconnectAttempt - 1), 8000);
+    window.setTimeout(async () => {
+      try {
+        await this.openWebSocket();
+        this.startHeartbeat();
+        this.reconnecting = false;
+        this.reconnectAttempt = 0;
+        this.events.onReconnected?.();
+      } catch (e) {
+        console.warn("[realtime] reconnect failed, will retry", e);
+        this.attemptReconnect();
+      }
+    }, delay);
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeatTimer = window.setInterval(() => {
+      if (this.ws?.readyState !== WebSocket.OPEN || !this.config) return;
+      // Idempotent session.update — keeps the stream warm without changing state.
+      const instructions = this.config.miraSession
+        ? buildInstructionsWithHistory(this.config.miraSession, this.getRecentHistory())
+        : this.config.instructions;
+      this.send({
+        type: "session.update",
+        session: { instructions },
+      });
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer != null) {
+      window.clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  getRecentHistory(): HistoryTurn[] {
+    const cutoff = Date.now() - HISTORY_WINDOW_MS;
+    this.history = this.history.filter((h) => h.ts >= cutoff);
+    return this.history.slice();
   }
 
   triggerResponse(instructions?: string) {
@@ -157,6 +261,16 @@ export class RealtimeSession {
   }
 
   sendUserText(text: string) {
+    this.history.push({ role: "user", text, ts: Date.now() });
+    // Best-effort: DashScope's conversation.item.create for text is flaky, but also
+    // refresh instructions so the next response sees the latest history.
+    if (this.config?.miraSession) {
+      const instructions = buildInstructionsWithHistory(
+        this.config.miraSession,
+        this.getRecentHistory(),
+      );
+      this.send({ type: "session.update", session: { instructions } });
+    }
     this.send({
       type: "conversation.item.create",
       item: {
@@ -171,6 +285,7 @@ export class RealtimeSession {
   async startInputCapture(): Promise<void> {
     if (typeof window === "undefined") throw new Error("browser only");
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia unavailable");
+    if (this.captureRunning) return;
 
     this.inStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -186,12 +301,8 @@ export class RealtimeSession {
       ((window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
     if (!AudioCtx) throw new Error("AudioContext unavailable");
 
-    // Most browsers accept sampleRate: 16_000 and resample the mic internally.
-    // Safari ≤14 does not; we'd detect later. For hackathon scope we target Chrome/Edge.
     this.inCtx = new AudioCtx({ sampleRate: INPUT_SAMPLE_RATE });
-    try {
-      await this.inCtx.resume();
-    } catch {}
+    try { await this.inCtx.resume(); } catch {}
 
     const workletUrl = URL.createObjectURL(
       new Blob([CAPTURE_WORKLET_SRC], { type: "application/javascript" }),
@@ -215,33 +326,32 @@ export class RealtimeSession {
           out.set(head.subarray(0, take), offset);
           offset += take;
           remaining -= take;
-          if (take === head.length) {
-            this.pendingCapture.shift();
-          } else {
-            this.pendingCapture[0] = head.subarray(take);
-          }
+          if (take === head.length) this.pendingCapture.shift();
+          else this.pendingCapture[0] = head.subarray(take);
         }
         this.pendingCaptureLen -= INPUT_CHUNK_SAMPLES;
+        // Noise gate: skip chunks below threshold to avoid wasting bandwidth
+        // and to give server VAD cleaner silence boundaries.
+        if (rms(out) < NOISE_GATE_RMS) continue;
         this.sendAudioChunk(out);
       }
     };
 
     this.inSource = this.inCtx.createMediaStreamSource(this.inStream);
 
-    // Connect through a muted gain so the AudioWorklet keeps running while we don't feed it to the speakers.
     const mute = this.inCtx.createGain();
     mute.gain.value = 0;
     this.inSource.connect(this.inWorklet);
     this.inWorklet.connect(mute);
     mute.connect(this.inCtx.destination);
+
+    this.captureRunning = true;
   }
 
   stopInputCapture() {
     try { this.inWorklet?.disconnect(); } catch {}
     try { this.inSource?.disconnect(); } catch {}
-    try {
-      this.inStream?.getTracks().forEach((t) => t.stop());
-    } catch {}
+    try { this.inStream?.getTracks().forEach((t) => t.stop()); } catch {}
     try { this.inCtx?.close(); } catch {}
     this.inWorklet = null;
     this.inSource = null;
@@ -249,16 +359,20 @@ export class RealtimeSession {
     this.inCtx = null;
     this.pendingCapture = [];
     this.pendingCaptureLen = 0;
+    this.captureRunning = false;
   }
 
   close() {
     if (this.closed) return;
     this.closed = true;
+    this.userRequestedClose = true;
+    this.stopHeartbeat();
     this.stopInputCapture();
     try { this.ws?.close(); } catch {}
     this.ws = null;
     try { this.outCtx?.close(); } catch {}
     this.outCtx = null;
+    this.outAnalyser = null;
   }
 
   private sendAudioChunk(float32: Float32Array) {
@@ -294,7 +408,6 @@ export class RealtimeSession {
         break;
 
       case "input_audio_buffer.speech_started":
-        // Barge-in: cut any in-progress Mira playback instantly.
         this.interruptPlayback();
         this.events.onUserSpeechStarted?.();
         break;
@@ -303,7 +416,10 @@ export class RealtimeSession {
         break;
       case "conversation.item.input_audio_transcription.completed": {
         const t = msg.transcript as string | undefined;
-        if (t) this.events.onUserTranscript?.(t);
+        if (t) {
+          this.history.push({ role: "user", text: t, ts: Date.now() });
+          this.events.onUserTranscript?.(t);
+        }
         break;
       }
 
@@ -325,6 +441,9 @@ export class RealtimeSession {
       }
       case "response.audio_transcript.done": {
         const transcript = (msg.transcript as string | undefined) ?? "";
+        if (transcript) {
+          this.history.push({ role: "assistant", text: transcript, ts: Date.now() });
+        }
         this.events.onAssistantTranscriptDone?.(transcript);
         break;
       }
@@ -358,9 +477,7 @@ export class RealtimeSession {
     src.start(startAt);
     this.nextPlayTime = startAt + buffer.duration;
     this.activeSources.add(src);
-    src.onended = () => {
-      this.activeSources.delete(src);
-    };
+    src.onended = () => this.activeSources.delete(src);
   }
 
   private interruptPlayback() {
@@ -378,6 +495,12 @@ export class RealtimeSession {
   }
 }
 
+function rms(samples: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  return Math.sqrt(sum / samples.length);
+}
+
 function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
@@ -388,7 +511,6 @@ function base64ToBytes(b64: string): Uint8Array {
 function int16ToBase64(int16: Int16Array): string {
   const bytes = new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength);
   let binary = "";
-  // Process in 8KB chunks to avoid call-stack blow-ups on long buffers.
   const step = 8192;
   for (let i = 0; i < bytes.length; i += step) {
     const slice = bytes.subarray(i, Math.min(i + step, bytes.length));

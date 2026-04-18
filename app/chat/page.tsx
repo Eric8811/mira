@@ -17,7 +17,8 @@ type ChatState =
   | "listening"
   | "hearing"
   | "thinking"
-  | "speaking";
+  | "speaking"
+  | "reconnecting";
 
 export default function Chat() {
   const { locale } = useLocale();
@@ -49,6 +50,16 @@ export default function Chat() {
       onUserSpeechStopped: () => setState("thinking"),
       onAudioStart: () => setState("speaking"),
       onResponseDone: () => setState("listening"),
+      onReconnecting: (attempt) => {
+        console.log("[chat] reconnecting", attempt);
+        // Only surface UI after the 2nd attempt — the 1st often succeeds invisibly.
+        if (attempt >= 2) setState("reconnecting");
+      },
+      onReconnected: () => {
+        console.log("[chat] reconnected");
+        setState("listening");
+        setError(null);
+      },
       onError: (err) => {
         console.warn("[chat realtime error]", err.message);
         setError(err.message);
@@ -66,6 +77,7 @@ export default function Chat() {
           instructions: buildRealtimeInstructions(s),
           voice: "Cherry",
           turnDetection: true,
+          miraSession: s,
         });
         setAnalyser(rt.getOutputAnalyser());
       } catch (e) {
@@ -179,6 +191,7 @@ export default function Chat() {
 function StatusPill({ state, locale }: { state: ChatState; locale: "en" | "zh" }) {
   const labels: Record<ChatState, { icon: string; en: string; zh: string }> = {
     connecting: { icon: "🌙", en: "connecting", zh: "连接中" },
+    reconnecting: { icon: "🔌", en: "reconnecting…", zh: "重新连接中…" },
     "mic-denied": { icon: "🔇", en: "mic blocked — type", zh: "麦克风未开 · 请用文字" },
     error: { icon: "⚠️", en: "connection issue", zh: "连接不稳" },
     listening: { icon: "🎙️", en: "listening", zh: "在听" },
