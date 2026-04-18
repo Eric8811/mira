@@ -26,6 +26,7 @@ export type RealtimeEvents = {
   onClose?: (code: number, reason: string) => void;
   onReconnecting?: (attempt: number) => void;
   onReconnected?: () => void;
+  onReconnectFailed?: () => void;
 };
 
 export type RealtimeConfig = {
@@ -87,6 +88,8 @@ export class RealtimeSession {
   private reconnecting = false;
   private captureRunning = false;
   private userRequestedClose = false;
+  private responseWatchdog: number | null = null;
+  private visibilityHandler: (() => void) | null = null;
 
   constructor(events: RealtimeEvents) {
     this.events = events;
@@ -114,6 +117,48 @@ export class RealtimeSession {
 
     await this.openWebSocket();
     this.startHeartbeat();
+
+    // When the tab comes back to foreground, make sure the WS is still up.
+    if (!this.visibilityHandler) {
+      this.visibilityHandler = () => {
+        if (document.hidden) return;
+        if (this.userRequestedClose || this.closed) return;
+        if (this.ws?.readyState === WebSocket.OPEN) return;
+        if (this.reconnecting) return;
+        console.log("[realtime] tab visible; ws not open → reconnecting");
+        this.handleUnexpectedClose();
+      };
+      document.addEventListener("visibilitychange", this.visibilityHandler);
+    }
+  }
+
+  /** Called by UI after MAX reconnects exhausted and user taps "reconnect". */
+  async manualReconnect(): Promise<void> {
+    this.reconnectAttempt = 0;
+    this.reconnecting = false;
+    this.userRequestedClose = false;
+    this.closed = false;
+    try { this.ws?.close(); } catch {}
+    await this.openWebSocket();
+    this.startHeartbeat();
+    this.events.onReconnected?.();
+  }
+
+  private armResponseWatchdog() {
+    this.clearResponseWatchdog();
+    // If no audio.delta lands within 5s after the server has a committed utterance,
+    // something is wrong upstream — force a reconnect.
+    this.responseWatchdog = window.setTimeout(() => {
+      console.warn("[realtime] watchdog: no audio delta within 5s of speech_stopped, forcing reconnect");
+      try { this.ws?.close(); } catch {}
+    }, 5000);
+  }
+
+  private clearResponseWatchdog() {
+    if (this.responseWatchdog != null) {
+      window.clearTimeout(this.responseWatchdog);
+      this.responseWatchdog = null;
+    }
   }
 
   private async openWebSocket() {
@@ -203,7 +248,7 @@ export class RealtimeSession {
     this.reconnectAttempt += 1;
     if (this.reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
       this.reconnecting = false;
-      this.events.onError?.(new Error("reconnect exhausted"));
+      this.events.onReconnectFailed?.();
       return;
     }
     this.events.onReconnecting?.(this.reconnectAttempt);
@@ -366,8 +411,13 @@ export class RealtimeSession {
     if (this.closed) return;
     this.closed = true;
     this.userRequestedClose = true;
+    this.clearResponseWatchdog();
     this.stopHeartbeat();
     this.stopInputCapture();
+    if (this.visibilityHandler) {
+      document.removeEventListener("visibilitychange", this.visibilityHandler);
+      this.visibilityHandler = null;
+    }
     try { this.ws?.close(); } catch {}
     this.ws = null;
     try { this.outCtx?.close(); } catch {}
@@ -408,10 +458,12 @@ export class RealtimeSession {
         break;
 
       case "input_audio_buffer.speech_started":
+        this.clearResponseWatchdog();
         this.interruptPlayback();
         this.events.onUserSpeechStarted?.();
         break;
       case "input_audio_buffer.speech_stopped":
+        this.armResponseWatchdog();
         this.events.onUserSpeechStopped?.();
         break;
       case "conversation.item.input_audio_transcription.completed": {
@@ -426,6 +478,7 @@ export class RealtimeSession {
       case "response.audio.delta": {
         const delta = msg.delta as string | undefined;
         if (delta) {
+          this.clearResponseWatchdog();
           if (!this.firstAudioEmitted) {
             this.firstAudioEmitted = true;
             this.events.onAudioStart?.();
@@ -448,6 +501,7 @@ export class RealtimeSession {
         break;
       }
       case "response.done":
+        this.clearResponseWatchdog();
         this.firstAudioEmitted = false;
         this.events.onResponseDone?.();
         break;

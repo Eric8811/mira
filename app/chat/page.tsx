@@ -23,7 +23,8 @@ type ChatState =
   | "hearing"
   | "thinking"
   | "speaking"
-  | "reconnecting";
+  | "reconnecting"
+  | "reconnect-failed";
 
 const ENCOUNTER_FLAG = "mira-encounter-delivered";
 
@@ -92,6 +93,10 @@ export default function Chat() {
         console.log("[chat] reconnected");
         setState("listening");
         setError(null);
+      },
+      onReconnectFailed: () => {
+        console.warn("[chat] reconnect exhausted");
+        setState("reconnect-failed");
       },
       onError: (err) => {
         console.warn("[chat realtime error]", err.message);
@@ -179,6 +184,32 @@ export default function Chat() {
           analyser={analyser}
         />
       </div>
+
+      {/* Manual reconnect after exhausting retries */}
+      <AnimatePresence>
+        {state === "reconnect-failed" && (
+          <motion.button
+            key="manual-reconnect"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            onClick={async () => {
+              setState("reconnecting");
+              try {
+                await rtRef.current?.manualReconnect();
+              } catch (e) {
+                console.warn("[chat] manual reconnect failed", e);
+                setState("reconnect-failed");
+              }
+            }}
+            className="fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-white/30 bg-black/60 px-5 py-3 text-sm text-white backdrop-blur transition hover:border-white/60"
+            style={{ bottom: "max(5rem, calc(env(safe-area-inset-bottom) + 4rem))" }}
+          >
+            <span>🔌</span>
+            <span>{locale === "zh" ? "轻触重新连接" : "Tap to reconnect"}</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Friendly mic permission prompt */}
       <AnimatePresence>
@@ -273,6 +304,7 @@ function StatusPill({ state, locale }: { state: ChatState; locale: "en" | "zh" }
   const labels: Record<ChatState, { icon: string; en: string; zh: string }> = {
     connecting: { icon: "🌙", en: "arriving", zh: "正在到来" },
     reconnecting: { icon: "🔌", en: "reconnecting…", zh: "重新连接中…" },
+    "reconnect-failed": { icon: "", en: "", zh: "" },
     "mic-denied": { icon: "🔇", en: "mic blocked — type", zh: "麦克风未开 · 请用文字" },
     error: { icon: "⚠️", en: "connection issue", zh: "连接不稳" },
     listening: { icon: "🎙️", en: "listening", zh: "在听" },
@@ -280,6 +312,7 @@ function StatusPill({ state, locale }: { state: ChatState; locale: "en" | "zh" }
     thinking: { icon: "💭", en: "…", zh: "…" },
     speaking: { icon: "🌌", en: "", zh: "" },
   };
+  if (!labels[state].icon && !labels[state].en && !labels[state].zh) return null;
   const l = labels[state];
   return (
     <motion.div
