@@ -1,5 +1,5 @@
 {
-  "name": "mira-scaffold",
+  "name": "mira",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,7 +11,11 @@
   "dependencies": {
     "react": "^18",
     "react-dom": "^18",
-    "next": "14.2.35"
+    "next": "14.2.35",
+    "framer-motion": "^11.11.17",
+    "iztro": "^2.5.3",
+    "next-intl": "^3.26.3",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "typescript": "^5",
