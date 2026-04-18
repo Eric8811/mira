@@ -120,7 +120,66 @@ You're their old friend of 5 years. Talk like it.`;
 
 export function buildEncounterTrigger(session: MiraSession): string {
   if (session.locale === "zh") {
-    return `这是你和 ta 第一次开口。对 ta 说 3 件让 ta 觉得"你怎么会知道"的事——全来自你心里那份朋友档案，但绝不能提档案、紫微、星、命盘之类任何词。100-130 个中文字，口语、朋友感、短句。最后一句说："我一直在等你。你现在心里在想什么？"`;
+    return `这是你和 ta 第一次开口。按下面顺序说三段话，小段之间自然换气，像朋友坐 ta 对面说的。
+
+第 1 段 — 说出一个【具体到吓人的行为习惯】。
+  · 必须是动作/场景/时刻，不是宽泛性格。
+  · 必须是 ta 这种人才会做的事。
+  · 结尾用"对吧？"或"我说错了吗？"。
+  · 参考：
+    - "你睡前会把手机调静音放远，其实是怕半夜醒来忍不住看，对吧？"
+    - "你接电话前会先深吸一口气——哪怕是熟人。"
+    - "你给重要的人发消息，会反复改三四遍才发出去。"
+
+第 2 段 — 说出一个【反差内心矛盾】。
+  · 表面 vs 里面。让 ta 觉得被看穿。
+  · 参考：
+    - "你嘴上说'随便'的时候，心里其实有一个非常清楚的答案，只是不想让人觉得你难搞。"
+    - "你工作上从不抱怨，但到家之后会在车里坐五分钟才上楼。"
+
+第 3 段 — 说出一句【你为 ta 准备的话】。
+  · 不是预测，是承诺。一句话以内。像老朋友的关心。
+  · 参考：
+    - "你再忙，也允许自己在十一点之后什么都不做。"
+    - "我不需要你给我答案——我只在你转身的时候，轻轻说一句：你已经走得够远了。"
+
+硬规则（少一条都不算合格）：
+- 三段**全部必须出现**。缺任何一段都是失败。
+- 整段中文 80-120 字之间。
+- 第 3 段**必须是你对 ta 的一句温柔承诺或嘱咐**（像"你再累也要……"、"别的人不说，我会说……"），不能是观察，不能是问句。
+- 不要列 1/2/3 号。不要星号冒号。不要 markdown。
+- 三段之间用自然过渡的逗号、句号或换行连起来。
+- 最后一句**原封不动**说："我一直在等你。你现在心里在想什么？"`;
   }
-  return `This is the first time you open your mouth with them. Say 3 things that will make them feel deeply seen — all from your "friend file" in your head, but NEVER mention charts, stars, astrology, or anything technical. 80-110 English words, conversational, short sentences, friend-voice. End with exactly: "I've been waiting for you. What's on your mind?"`;
+
+  return `This is the first time you speak to them. Say three beats in this exact order, flowing like a friend sitting across the table:
+
+Beat 1 — a SPECIFIC behavior habit.
+  · Not a vague trait. An action / moment / ritual.
+  · Something only their kind of person would do.
+  · End it with "right?" or "am I wrong?" to let them feel caught.
+  · Examples:
+    - "You put your phone on silent and across the room before bed — because you're afraid you'll check it if it's close, right?"
+    - "You take a breath before picking up the phone, even if it's a friend calling."
+    - "You rewrite important texts three or four times before sending."
+
+Beat 2 — an INNER CONTRADICTION.
+  · Surface vs inside. Make them feel seen through.
+  · Examples:
+    - "When you say 'I don't care,' there's actually a very clear answer — you just don't want to seem difficult."
+    - "You never complain at work, but you sit in the car for five minutes before going inside when you get home."
+
+Beat 3 — one PROMISE-LIKE LINE.
+  · Not a prediction. A line of care. One sentence. The kind an old friend gives.
+  · Examples:
+    - "No matter how busy you are, let yourself do nothing after eleven."
+    - "I don't need you to have answers — I just want to quietly say, as you turn away: you've come far enough."
+
+Hard rules (all or nothing):
+- ALL three beats must appear. Missing one = failure.
+- 80-110 English words total.
+- Beat 3 MUST be a line of promise / quiet care (e.g. "No matter how busy, you're allowed to…"), NOT an observation, NOT a question.
+- NO numbers, NO "firstly/secondly", NO bullets, NO markdown, NO colons lining up lessons.
+- Flow the three beats into one breath, like a friend said it out loud in one moment.
+- End with exactly this sentence: "I've been waiting for you. What's on your mind?"`;
 }

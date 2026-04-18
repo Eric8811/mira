@@ -26,16 +26,12 @@ export default function Chat() {
   const [session, setSession] = useState<MiraSession | null>(null);
   const [state, setState] = useState<ChatState>("connecting");
   const [error, setError] = useState<string | null>(null);
-  const [currentLine, setCurrentLine] = useState("");
-  const [lineVisible, setLineVisible] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
   const rtRef = useRef<RealtimeSession | null>(null);
   const startedRef = useRef(false);
-  const deltaBufferRef = useRef("");
-  const fadeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const s = loadSession();
@@ -49,33 +45,10 @@ export default function Chat() {
     startedRef.current = true;
 
     const rt = new RealtimeSession({
-      onUserSpeechStarted: () => {
-        setState("hearing");
-        // Clear any lingering Mira line when user starts speaking
-        setLineVisible(false);
-      },
+      onUserSpeechStarted: () => setState("hearing"),
       onUserSpeechStopped: () => setState("thinking"),
-      onAudioStart: () => {
-        setState("speaking");
-        deltaBufferRef.current = "";
-        setCurrentLine("");
-        setLineVisible(true);
-      },
-      onAssistantTranscriptDelta: (delta) => {
-        deltaBufferRef.current += delta;
-        setCurrentLine(deltaBufferRef.current);
-      },
-      onAssistantTranscriptDone: (full) => {
-        if (full) setCurrentLine(full);
-      },
-      onResponseDone: () => {
-        setState("listening");
-        // Let the final line linger briefly, then fade out
-        if (fadeTimerRef.current) window.clearTimeout(fadeTimerRef.current);
-        fadeTimerRef.current = window.setTimeout(() => {
-          setLineVisible(false);
-        }, 2600);
-      },
+      onAudioStart: () => setState("speaking"),
+      onResponseDone: () => setState("listening"),
       onError: (err) => {
         console.warn("[chat realtime error]", err.message);
         setError(err.message);
@@ -113,7 +86,6 @@ export default function Chat() {
     })();
 
     return () => {
-      if (fadeTimerRef.current) window.clearTimeout(fadeTimerRef.current);
       rtRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -125,7 +97,6 @@ export default function Chat() {
     rtRef.current.sendUserText(text);
     setTyped("");
     setState("thinking");
-    setLineVisible(false);
   }, [typed]);
 
   if (!session) return null;
@@ -141,31 +112,13 @@ export default function Chat() {
     >
       <StatusPill state={state} locale={locale} />
 
-      <div className="relative z-10 flex flex-1 flex-col items-center justify-center gap-10">
+      <div className="relative z-10 flex flex-1 flex-col items-center justify-center">
         <MiraCharacter
           archetype={archetype}
           state={state === "speaking" ? "speaking" : "idle"}
-          size={240}
+          size={260}
           analyser={analyser}
         />
-
-        {/* Single-line whisper of what Mira is saying right now, fades in/out */}
-        <div className="relative min-h-[4rem] w-full max-w-xl">
-          <AnimatePresence mode="wait">
-            {lineVisible && currentLine && (
-              <motion.p
-                key="mira-line"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 0.8, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 1.2, ease: "easeOut" }}
-                className="px-4 text-center font-serif-display text-xl italic leading-relaxed text-white/80 md:text-2xl"
-              >
-                {currentLine}
-              </motion.p>
-            )}
-          </AnimatePresence>
-        </div>
       </div>
 
       {/* Keyboard fallback */}
