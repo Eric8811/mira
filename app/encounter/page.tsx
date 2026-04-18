@@ -63,8 +63,8 @@ export default function Encounter() {
   async function openRealtime(s: MiraSession) {
     const rt = new RealtimeSession({
       onAudioStart: () => setStatus("speaking"),
-      onTranscriptDelta: (delta) => setDisplayed((prev) => prev + delta),
-      onTranscriptDone: (full) => {
+      onAssistantTranscriptDelta: (delta) => setDisplayed((prev) => prev + delta),
+      onAssistantTranscriptDone: (full) => {
         if (full) setDisplayed(full);
       },
       onResponseDone: () => setStatus("ready"),
