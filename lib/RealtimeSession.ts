@@ -146,12 +146,13 @@ export class RealtimeSession {
 
   private armResponseWatchdog() {
     this.clearResponseWatchdog();
-    // If no audio.delta lands within 5s after the server has a committed utterance,
-    // something is wrong upstream — force a reconnect.
+    // If no audio.delta lands within 8s after the server has a committed utterance,
+    // something is wrong upstream — force a reconnect. 8s leaves plenty of headroom
+    // for the normal ~1-2s first-token time without false-positive reconnects.
     this.responseWatchdog = window.setTimeout(() => {
-      console.warn("[realtime] watchdog: no audio delta within 5s of speech_stopped, forcing reconnect");
+      console.warn("[realtime] watchdog: no audio delta within 8s of speech_stopped, forcing reconnect");
       try { this.ws?.close(); } catch {}
-    }, 5000);
+    }, 8000);
   }
 
   private clearResponseWatchdog() {
