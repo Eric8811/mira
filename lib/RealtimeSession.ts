@@ -59,6 +59,7 @@ export class RealtimeSession {
   private firstAudioEmitted = false;
   private pendingCapture: Float32Array[] = [];
   private pendingCaptureLen = 0;
+  private activeSources: Set<AudioBufferSourceNode> = new Set();
 
   constructor(events: RealtimeEvents) {
     this.events = events;
@@ -135,6 +136,8 @@ export class RealtimeSession {
               threshold: 0.5,
               prefix_padding_ms: 300,
               silence_duration_ms: 500,
+              create_response: true,
+              interrupt_response: true,
             }
           : null,
       },
@@ -291,6 +294,8 @@ export class RealtimeSession {
         break;
 
       case "input_audio_buffer.speech_started":
+        // Barge-in: cut any in-progress Mira playback instantly.
+        this.interruptPlayback();
         this.events.onUserSpeechStarted?.();
         break;
       case "input_audio_buffer.speech_stopped":
@@ -352,6 +357,20 @@ export class RealtimeSession {
     const startAt = Math.max(this.outCtx.currentTime, this.nextPlayTime);
     src.start(startAt);
     this.nextPlayTime = startAt + buffer.duration;
+    this.activeSources.add(src);
+    src.onended = () => {
+      this.activeSources.delete(src);
+    };
+  }
+
+  private interruptPlayback() {
+    if (!this.outCtx) return;
+    this.activeSources.forEach((src) => {
+      try { src.onended = null; src.stop(); src.disconnect(); } catch {}
+    });
+    this.activeSources.clear();
+    this.nextPlayTime = this.outCtx.currentTime;
+    this.firstAudioEmitted = false;
   }
 
   getOutputAnalyser(): AnalyserNode | null {
