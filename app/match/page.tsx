@@ -14,7 +14,7 @@ import { useLocale } from "@/components/I18nProvider";
 import { getChart, extractKeyStars } from "@/lib/chart";
 import { getArchetypeFromMainStar } from "@/lib/archetype-map";
 import { RealtimeSession } from "@/lib/RealtimeSession";
-import { WS_PROXY_URL } from "@/lib/realtime-config";
+import { voiceForLocale, WS_PROXY_URL } from "@/lib/realtime-config";
 import {
   buildMatchInstructions,
   buildMatchTrigger,
@@ -120,7 +120,7 @@ export default function Match() {
       await rt.connect({
         proxyUrl: WS_PROXY_URL,
         instructions: buildMatchInstructions(session, sub, relLabel, locale),
-        voice: "Cherry",
+        voice: voiceForLocale(locale),
         turnDetection: false,
       });
       setAnalyser(rt.getOutputAnalyser());

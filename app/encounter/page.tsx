@@ -13,6 +13,7 @@ import { RealtimeSession } from "@/lib/RealtimeSession";
 import {
   buildEncounterTrigger,
   buildRealtimeInstructions,
+  voiceForLocale,
   WS_PROXY_URL,
 } from "@/lib/realtime-config";
 
@@ -69,7 +70,7 @@ export default function Encounter() {
     await rt.connect({
       proxyUrl: WS_PROXY_URL,
       instructions: buildRealtimeInstructions(s),
-      voice: "Cherry",
+      voice: voiceForLocale(s.locale),
       turnDetection: false,
     });
 

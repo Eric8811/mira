@@ -83,26 +83,6 @@ export const SCENARIOS: Record<Archetype, Record<Topic, SceneTemplate>> = {
   },
 };
 
-// Beat-3 of First Encounter: three concrete topic options (replaces the generic "what's on your mind?").
-export const FIRST_ENCOUNTER_TOPICS: Record<Archetype, { zh: string; en: string }> = {
-  sovereign: {
-    zh: "感情、工作，还是心里那个'接下来怎么办'的问题？",
-    en: "relationships, work, or that quiet 'what's next' feeling?",
-  },
-  flame: {
-    zh: "最想改变的事、谁在拖你后腿，还是接下来的那个突破？",
-    en: "something you want to burn down, someone holding you back, or the next leap?",
-  },
-  seer: {
-    zh: "最近想不明白的事、心里说不出口的感受，还是未来的方向？",
-    en: "something you can't figure out, a feeling you can't name, or where you're heading?",
-  },
-  warmth: {
-    zh: "最近在意的那个人、心里攒着的委屈，还是你想要的那种温暖？",
-    en: "someone on your mind, something you've been holding in, or the kind of warmth you're quietly wanting?",
-  },
-};
-
 export function buildScenarioBlock(archetype: Archetype, locale: "en" | "zh"): string {
   const t = SCENARIOS[archetype];
   if (locale === "zh") {

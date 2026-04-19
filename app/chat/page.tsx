@@ -11,6 +11,7 @@ import { RealtimeSession } from "@/lib/RealtimeSession";
 import {
   buildEncounterTrigger,
   buildRealtimeInstructions,
+  voiceForLocale,
   WS_PROXY_URL,
 } from "@/lib/realtime-config";
 import { useResponsiveSize } from "@/lib/useResponsiveSize";
@@ -113,7 +114,7 @@ export default function Chat() {
         await rt.connect({
           proxyUrl: WS_PROXY_URL,
           instructions: buildRealtimeInstructions(s),
-          voice: "Cherry",
+          voice: voiceForLocale(s.locale),
           turnDetection: true,
           miraSession: s,
         });

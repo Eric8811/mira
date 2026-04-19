@@ -549,22 +549,45 @@ export class RealtimeSession {
     }
     const src = this.outCtx.createBufferSource();
     src.buffer = buffer;
-    // Route through outGain so Mira's playback is attenuated before hitting the speakers.
-    src.connect(this.outGain ?? this.outAnalyser ?? this.outCtx.destination);
+
+    // 2ms fade in/out per chunk — masks micro-clicks at splice boundaries between
+    // variable-sized chunks (especially noticeable on EN plosives/fricatives).
+    const fader = this.outCtx.createGain();
     const startAt = Math.max(this.outCtx.currentTime, this.nextPlayTime);
+    const endAt = startAt + buffer.duration;
+    const FADE = 0.002; // 2ms
+    if (buffer.duration > FADE * 2.5) {
+      fader.gain.setValueAtTime(0.0001, startAt);
+      fader.gain.linearRampToValueAtTime(1, startAt + FADE);
+      fader.gain.setValueAtTime(1, endAt - FADE);
+      fader.gain.linearRampToValueAtTime(0, endAt);
+    } else {
+      fader.gain.setValueAtTime(1, startAt);
+    }
+
+    src.connect(fader);
+    fader.connect(this.outGain ?? this.outAnalyser ?? this.outCtx.destination);
+
     src.start(startAt);
     if (this.activeSources.size === 0) {
       console.log(`[mira] ▶ first chunk scheduled @ ${Math.round(performance.now())} (ctx+${(startAt - this.outCtx.currentTime).toFixed(3)}s)`);
     }
-    this.nextPlayTime = startAt + buffer.duration;
+    this.nextPlayTime = endAt;
     this.activeSources.add(src);
-    src.onended = () => this.activeSources.delete(src);
+    src.onended = () => {
+      this.activeSources.delete(src);
+      try { fader.disconnect(); } catch {}
+    };
   }
 
   private interruptPlayback() {
     if (!this.outCtx) return;
     this.activeSources.forEach((src) => {
-      try { src.onended = null; src.stop(); src.disconnect(); } catch {}
+      try {
+        src.onended = null;
+        src.stop();
+        src.disconnect();
+      } catch {}
     });
     this.activeSources.clear();
     this.nextPlayTime = this.outCtx.currentTime;
