@@ -9,6 +9,8 @@
 //   (last 5 min) into the instructions field. DashScope's conversation.item.create doesn't
 //   process text user turns reliably, so we fake memory via instructions.
 // - Noise-gate on the input path skips near-silent chunks to keep VAD from misfiring.
+// - While Mira is speaking, mic frames are held back to avoid speaker echo
+//   triggering a fake user turn on no-headphones demos.
 
 import { buildInstructionsWithHistory } from "./realtime-config";
 import type { MiraSession } from "./session";
@@ -96,6 +98,9 @@ export class RealtimeSession {
   // know the user is mid-utterance, stop gating silent frames — otherwise the tail
   // of their sentence never triggers speech_stopped on the server.
   private speechActive = false;
+  private inputMuted = false;
+  private assistantOutputActive = false;
+  private assistantResponseDone = true;
 
   constructor(events: RealtimeEvents) {
     this.events = events;
@@ -321,24 +326,37 @@ export class RealtimeSession {
 
   sendUserText(text: string) {
     this.history.push({ role: "user", text, ts: Date.now() });
-    // Best-effort: DashScope's conversation.item.create for text is flaky, but also
-    // refresh instructions so the next response sees the latest history.
-    if (this.config?.miraSession) {
-      const instructions = buildInstructionsWithHistory(
-        this.config.miraSession,
-        this.getRecentHistory(),
-      );
-      this.send({ type: "session.update", session: { instructions } });
+
+    const instructions = this.buildTextTurnInstructions(text);
+
+    // Keep session memory fresh for the next spoken turn. Do not rely on this
+    // for the current typed turn though: session.update and response.create can
+    // race, and DashScope's conversation.item.create with input_text is not
+    // reliable enough to carry the latest message by itself.
+    if (instructions.session) {
+      this.send({ type: "session.update", session: { instructions: instructions.session } });
     }
-    this.send({
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text }],
-      },
-    });
-    this.triggerResponse();
+
+    this.triggerResponse(instructions.response);
+  }
+
+  private buildTextTurnInstructions(text: string): { session?: string; response: string } {
+    const cfg = this.config;
+    const recent = this.getRecentHistory();
+    const sessionInstructions = cfg?.miraSession
+      ? buildInstructionsWithHistory(cfg.miraSession, recent)
+      : cfg?.instructions;
+
+    const locale = cfg?.miraSession?.locale;
+    const latest =
+      locale === "zh"
+        ? `\n\n【最新文字输入】\n用户刚刚说：${quoteForPrompt(text)}\n只回复这句话。不要重新开场，不要问候，不要忽略它。`
+        : `\n\n[LATEST TYPED MESSAGE]\nThe user just said: ${quoteForPrompt(text)}\nReply to this exact message. Do not restart the greeting. Do not ignore it.`;
+
+    return {
+      session: sessionInstructions,
+      response: `${sessionInstructions ?? ""}${latest}`,
+    };
   }
 
   async startInputCapture(): Promise<void> {
@@ -391,6 +409,7 @@ export class RealtimeSession {
           else this.pendingCapture[0] = head.subarray(take);
         }
         this.pendingCaptureLen -= INPUT_CHUNK_SAMPLES;
+        if (this.inputMuted || this.assistantOutputActive) continue;
         // Gate silent frames ONLY while idle (between turns).
         // Once the server detects speech_started, keep streaming every frame —
         // server VAD needs the silence tail to fire speech_stopped.
@@ -410,6 +429,11 @@ export class RealtimeSession {
     this.captureRunning = true;
   }
 
+  setInputMuted(muted: boolean) {
+    this.inputMuted = muted;
+    if (muted) this.speechActive = false;
+  }
+
   stopInputCapture() {
     try { this.inWorklet?.disconnect(); } catch {}
     try { this.inSource?.disconnect(); } catch {}
@@ -422,6 +446,7 @@ export class RealtimeSession {
     this.pendingCapture = [];
     this.pendingCaptureLen = 0;
     this.captureRunning = false;
+    this.speechActive = false;
   }
 
   close() {
@@ -501,6 +526,8 @@ export class RealtimeSession {
         const delta = msg.delta as string | undefined;
         if (delta) {
           this.clearResponseWatchdog();
+          this.assistantOutputActive = true;
+          this.assistantResponseDone = false;
           if (!this.firstAudioEmitted) {
             this.firstAudioEmitted = true;
             console.log(`[mira] ← first audio.delta @ ${Math.round(performance.now())}`);
@@ -526,6 +553,8 @@ export class RealtimeSession {
       case "response.done":
         this.clearResponseWatchdog();
         this.firstAudioEmitted = false;
+        this.assistantResponseDone = true;
+        if (this.activeSources.size === 0) this.assistantOutputActive = false;
         this.events.onResponseDone?.();
         break;
       case "error": {
@@ -576,6 +605,9 @@ export class RealtimeSession {
     this.activeSources.add(src);
     src.onended = () => {
       this.activeSources.delete(src);
+      if (this.activeSources.size === 0 && this.assistantResponseDone) {
+        this.assistantOutputActive = false;
+      }
       try { fader.disconnect(); } catch {}
     };
   }
@@ -592,6 +624,8 @@ export class RealtimeSession {
     this.activeSources.clear();
     this.nextPlayTime = this.outCtx.currentTime;
     this.firstAudioEmitted = false;
+    this.assistantOutputActive = false;
+    this.assistantResponseDone = true;
   }
 
   getOutputAnalyser(): AnalyserNode | null {
@@ -621,4 +655,8 @@ function int16ToBase64(int16: Int16Array): string {
     for (let j = 0; j < slice.length; j++) binary += String.fromCharCode(slice[j]);
   }
   return btoa(binary);
+}
+
+function quoteForPrompt(text: string): string {
+  return `"""${text.replaceAll('"""', '\\"\\"\\"')}"""`;
 }
