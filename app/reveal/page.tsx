@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { motion, AnimatePresence } from "framer-motion";
 import { MiraCharacter } from "@/components/MiraCharacter";
 import { ARCHETYPE_META, type Archetype } from "@/lib/archetype-map";
+import { ARCHETYPE_SUMMARY } from "@/lib/archetype-summary";
 import { loadSession } from "@/lib/session";
 import { useLocale } from "@/components/I18nProvider";
 
@@ -28,7 +29,8 @@ export default function Reveal() {
       setTimeout(() => setPhase(1), 1000),
       setTimeout(() => setPhase(2), 2000),
       setTimeout(() => setPhase(3), 2500),
-      setTimeout(() => setPhase(4), 3000),
+      setTimeout(() => setPhase(4), 3200), // summary fades in
+      setTimeout(() => setPhase(5), 5400), // continue button appears
     ];
     return () => timers.forEach(clearTimeout);
   }, [router]);
@@ -83,7 +85,7 @@ export default function Reveal() {
           <MiraCharacter archetype={archetype} state="idle" size={320} />
         </motion.div>
 
-        <div className="flex min-h-[6rem] flex-col items-center gap-3">
+        <div className="flex flex-col items-center gap-4 text-center">
           {phase >= 2 && (
             <motion.h1
               initial={{ opacity: 0 }}
@@ -100,20 +102,31 @@ export default function Reveal() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="text-white/70"
+              className="text-sm text-white/55 md:text-base"
             >
               {t("subtitle")}
             </motion.p>
           )}
+          {phase >= 4 && (
+            <motion.p
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 1.2, ease: "easeOut" }}
+              className="mt-3 max-w-md whitespace-pre-line font-serif-display text-base italic leading-relaxed md:text-lg"
+              style={{ color: `${meta.accent}CC` }}
+            >
+              {ARCHETYPE_SUMMARY[archetype][locale]}
+            </motion.p>
+          )}
         </div>
 
-        {phase >= 4 && (
+        {phase >= 5 && (
           <motion.button
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6, delay: 0.3 }}
             onClick={() => router.push("/chat")}
-            className="mt-8 rounded-full border border-white/30 px-6 py-2 text-sm uppercase tracking-[0.25em] text-white/80 transition hover:border-white/60 hover:text-white"
+            className="mt-6 rounded-full border border-white/30 px-6 py-2 text-sm uppercase tracking-[0.25em] text-white/80 transition hover:border-white/60 hover:text-white"
           >
             {t("continue")}
           </motion.button>

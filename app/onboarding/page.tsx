@@ -75,10 +75,10 @@ export default function Onboarding() {
 
   return (
     <main
-      className="mira-stars relative flex min-h-[100dvh] items-start justify-center px-4 py-8 sm:items-center"
+      className="mira-stars relative flex min-h-[100dvh] items-center justify-center px-4 py-6"
       style={{
-        paddingTop: "max(2.5rem, env(safe-area-inset-top))",
-        paddingBottom: "max(2rem, env(safe-area-inset-bottom))",
+        paddingTop: "max(1.5rem, env(safe-area-inset-top))",
+        paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))",
       }}
     >
       <motion.form

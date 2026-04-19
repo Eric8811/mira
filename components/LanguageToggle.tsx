@@ -1,11 +1,15 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useLocale } from "./I18nProvider";
 
 export function LanguageToggle() {
   const { toggle } = useLocale();
   const t = useTranslations("common");
+  const pathname = usePathname();
+  // /chat has its own hamburger menu that hosts language switching.
+  if (pathname === "/chat") return null;
   return (
     <button
       type="button"

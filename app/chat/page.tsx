@@ -16,6 +16,7 @@ import {
 } from "@/lib/realtime-config";
 import { useResponsiveSize } from "@/lib/useResponsiveSize";
 import { ChartInsights } from "@/components/ChartInsights";
+import { HamburgerMenu } from "@/components/HamburgerMenu";
 
 type ChatState =
   | "connecting"
@@ -31,7 +32,7 @@ type ChatState =
 const ENCOUNTER_FLAG = "mira-encounter-delivered";
 
 export default function Chat() {
-  const { locale } = useLocale();
+  const { locale, toggle: toggleLocale } = useLocale();
   const router = useRouter();
 
   const [session, setSession] = useState<MiraSession | null>(null);
@@ -43,6 +44,7 @@ export default function Chat() {
   const [micGranted, setMicGranted] = useState(false);
   const [micPrompt, setMicPrompt] = useState(false);
   const [insightsOpen, setInsightsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const rtRef = useRef<RealtimeSession | null>(null);
   const startedRef = useRef(false);
@@ -64,6 +66,17 @@ export default function Chat() {
       setError((e as Error).message);
     }
   }, [micGranted, state]);
+
+  const toggleMic = useCallback(async () => {
+    if (!rtRef.current) return;
+    if (micGranted) {
+      rtRef.current.stopInputCapture();
+      setMicGranted(false);
+      setMicPrompt(true);
+    } else {
+      await enableMic();
+    }
+  }, [micGranted, enableMic]);
 
   useEffect(() => {
     const s = loadSession();
@@ -89,16 +102,13 @@ export default function Chat() {
         }
       },
       onReconnecting: (attempt) => {
-        console.log("[chat] reconnecting", attempt);
         if (attempt >= 2) setState("reconnecting");
       },
       onReconnected: () => {
-        console.log("[chat] reconnected");
         setState("listening");
         setError(null);
       },
       onReconnectFailed: () => {
-        console.warn("[chat] reconnect exhausted");
         setState("reconnect-failed");
       },
       onError: (err) => {
@@ -128,13 +138,11 @@ export default function Chat() {
         return;
       }
 
-      // On the first visit, Mira opens with the First Encounter right away — no mic needed yet.
       if (!alreadyDelivered) {
-        setState("thinking"); // brief gap while tokens warm up
+        setState("thinking");
         rt.triggerResponse(buildEncounterTrigger(s));
       }
 
-      // Try to start mic immediately (succeeds silently if previously granted).
       try {
         await rt.startInputCapture();
         setMicGranted(true);
@@ -177,20 +185,30 @@ export default function Chat() {
         paddingBottom: "max(4rem, env(safe-area-inset-bottom))",
       }}
     >
-      <StatusPill state={state} locale={locale} />
-
-      {/* Chart insights icon — top-right, next to language toggle */}
+      {/* Hamburger — top-left */}
       <button
-        onClick={() => setInsightsOpen(true)}
-        className="fixed z-50 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-sm text-white/80 backdrop-blur transition hover:border-white/40 active:scale-95 sm:h-10 sm:w-10"
+        onClick={() => setMenuOpen(true)}
+        className="fixed z-50 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-lg text-white/80 backdrop-blur transition hover:border-white/35 active:scale-95"
         style={{
-          right: "calc(max(1rem, env(safe-area-inset-right)) + 5rem)",
+          left: "max(1rem, env(safe-area-inset-left))",
           top: "max(1rem, env(safe-area-inset-top))",
         }}
-        aria-label={locale === "zh" ? "命盘解读" : "Chart reading"}
+        aria-label={locale === "zh" ? "菜单" : "Menu"}
       >
-        ✦
+        ☰
       </button>
+
+      <HamburgerMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        archetype={archetype}
+        locale={locale}
+        onAction={(action) => {
+          if (action.type === "open-insights") setInsightsOpen(true);
+          else if (action.type === "open-match") router.push("/match");
+          else if (action.type === "toggle-locale") toggleLocale();
+        }}
+      />
 
       <ChartInsights
         open={insightsOpen}
@@ -198,6 +216,8 @@ export default function Chat() {
         archetype={archetype}
         locale={locale}
       />
+
+      <StatusPill state={state} locale={locale} />
 
       <div className="relative z-10 flex flex-1 flex-col items-center justify-center">
         <MiraCharacter
@@ -220,13 +240,12 @@ export default function Chat() {
               setState("reconnecting");
               try {
                 await rtRef.current?.manualReconnect();
-              } catch (e) {
-                console.warn("[chat] manual reconnect failed", e);
+              } catch {
                 setState("reconnect-failed");
               }
             }}
             className="fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-white/30 bg-black/60 px-5 py-3 text-sm text-white backdrop-blur transition hover:border-white/60"
-            style={{ bottom: "max(5rem, calc(env(safe-area-inset-bottom) + 4rem))" }}
+            style={{ bottom: "max(7rem, calc(env(safe-area-inset-bottom) + 6rem))" }}
           >
             <span>🔌</span>
             <span>{locale === "zh" ? "轻触重新连接" : "Tap to reconnect"}</span>
@@ -234,7 +253,7 @@ export default function Chat() {
         )}
       </AnimatePresence>
 
-      {/* Friendly mic permission prompt */}
+      {/* Mic permission prompt (shown when not granted) */}
       <AnimatePresence>
         {micPrompt && !micGranted && (
           <motion.button
@@ -244,32 +263,24 @@ export default function Chat() {
             exit={{ opacity: 0 }}
             onClick={enableMic}
             className="fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-[var(--mira-accent)]/50 bg-black/50 px-5 py-3 text-sm text-white backdrop-blur transition hover:border-[var(--mira-accent)]"
-            style={{ bottom: "max(5rem, calc(env(safe-area-inset-bottom) + 4rem))" }}
+            style={{ bottom: "max(7rem, calc(env(safe-area-inset-bottom) + 6rem))" }}
           >
             <span>🎙️</span>
             <span>
               {locale === "zh"
-                ? "允许麦克风，Mira 才能听你说"
-                : "Let Mira hear you — tap to allow"}
+                ? "点铃铛激活麦克风"
+                : "Tap the bell to enable the mic"}
             </span>
           </motion.button>
         )}
       </AnimatePresence>
 
-      {/* Match CTA — subtle, lower-left */}
-      <button
-        onClick={() => router.push("/match")}
-        className="fixed left-4 z-30 rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-[10px] uppercase tracking-[0.25em] text-white/60 backdrop-blur transition hover:border-white/30 hover:text-white/90 sm:left-6 sm:px-4 sm:py-2 sm:text-xs"
-        style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
-      >
-        {locale === "zh" ? "✦ 合盘" : "✦ read a match"}
-      </button>
-
-      {/* Keyboard fallback */}
+      {/* Bell button — bottom-right (gradient) + keyboard fallback icon */}
       <div
-        className="fixed right-4 z-40 flex flex-col items-end gap-2 sm:right-6"
+        className="fixed right-4 z-40 flex flex-col items-end gap-3 sm:right-6"
         style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
       >
+        {/* Keyboard typing overlay */}
         <AnimatePresence>
           {keyboardOpen && (
             <motion.div
@@ -305,17 +316,36 @@ export default function Chat() {
           )}
         </AnimatePresence>
 
-        <button
-          onClick={() => setKeyboardOpen((v) => !v)}
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/30 text-lg backdrop-blur transition hover:border-white/30"
-          aria-label={locale === "zh" ? "键盘输入" : "Keyboard input"}
-        >
-          ⌨️
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setKeyboardOpen((v) => !v)}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/30 text-sm backdrop-blur transition hover:border-white/30 active:scale-95"
+            aria-label={locale === "zh" ? "键盘输入" : "Keyboard input"}
+          >
+            ⌨️
+          </button>
+
+          <button
+            onClick={toggleMic}
+            className="relative flex h-[72px] w-[72px] items-center justify-center rounded-full text-2xl text-white transition active:scale-95"
+            style={{
+              background: micGranted
+                ? "linear-gradient(135deg, rgba(124, 58, 237, 0.95) 0%, rgba(212, 175, 55, 0.9) 100%)"
+                : "linear-gradient(135deg, rgba(80, 60, 120, 0.4) 0%, rgba(150, 120, 60, 0.4) 100%)",
+              boxShadow: micGranted
+                ? "0 10px 30px -8px rgba(124, 58, 237, 0.55), 0 0 30px -4px rgba(212, 175, 55, 0.4)"
+                : "0 4px 14px -4px rgba(0,0,0,0.4)",
+            }}
+            aria-label={micGranted ? (locale === "zh" ? "暂停麦克风" : "Mute") : (locale === "zh" ? "激活麦克风" : "Unmute")}
+          >
+            {micGranted ? "🔔" : "🔕"}
+          </button>
+        </div>
       </div>
 
       {error && state !== "listening" && state !== "hearing" && state !== "speaking" && !micPrompt && (
-        <div className="pointer-events-none fixed bottom-6 left-6 max-w-sm rounded-lg border border-red-500/25 bg-red-950/40 px-3 py-2 text-xs text-red-200/80 backdrop-blur">
+        <div className="pointer-events-none fixed left-6 max-w-sm rounded-lg border border-red-500/25 bg-red-950/40 px-3 py-2 text-xs text-red-200/80 backdrop-blur"
+          style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}>
           {error}
         </div>
       )}

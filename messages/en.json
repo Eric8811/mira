@@ -15,18 +15,18 @@
     "genderFemale": "Female",
     "submit": "Meet Mira",
     "hours": {
-      "0": "11 PM – 1 AM (子时)",
-      "1": "1 AM – 3 AM (丑时)",
-      "2": "3 AM – 5 AM (寅时)",
-      "3": "5 AM – 7 AM (卯时)",
-      "4": "7 AM – 9 AM (辰时)",
-      "5": "9 AM – 11 AM (巳时)",
-      "6": "11 AM – 1 PM (午时)",
-      "7": "1 PM – 3 PM (未时)",
-      "8": "3 PM – 5 PM (申时)",
-      "9": "5 PM – 7 PM (酉时)",
-      "10": "7 PM – 9 PM (戌时)",
-      "11": "9 PM – 11 PM (亥时)"
+      "0": "11 PM – 1 AM · Rat hour",
+      "1": "1 AM – 3 AM · Ox hour",
+      "2": "3 AM – 5 AM · Tiger hour",
+      "3": "5 AM – 7 AM · Rabbit hour",
+      "4": "7 AM – 9 AM · Dragon hour",
+      "5": "9 AM – 11 AM · Snake hour",
+      "6": "11 AM – 1 PM · Horse hour",
+      "7": "1 PM – 3 PM · Goat hour",
+      "8": "3 PM – 5 PM · Monkey hour",
+      "9": "5 PM – 7 PM · Rooster hour",
+      "10": "7 PM – 9 PM · Dog hour",
+      "11": "9 PM – 11 PM · Pig hour"
     }
   },
   "reveal": {
