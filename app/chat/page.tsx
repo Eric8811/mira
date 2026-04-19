@@ -15,6 +15,7 @@ import {
   WS_PROXY_URL,
 } from "@/lib/realtime-config";
 import { useResponsiveSize } from "@/lib/useResponsiveSize";
+import { ChartInsights } from "@/components/ChartInsights";
 
 type ChatState =
   | "connecting"
@@ -41,6 +42,7 @@ export default function Chat() {
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [micGranted, setMicGranted] = useState(false);
   const [micPrompt, setMicPrompt] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
 
   const rtRef = useRef<RealtimeSession | null>(null);
   const startedRef = useRef(false);
@@ -176,6 +178,26 @@ export default function Chat() {
       }}
     >
       <StatusPill state={state} locale={locale} />
+
+      {/* Chart insights icon — top-right, next to language toggle */}
+      <button
+        onClick={() => setInsightsOpen(true)}
+        className="fixed z-50 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-sm text-white/80 backdrop-blur transition hover:border-white/40 active:scale-95 sm:h-10 sm:w-10"
+        style={{
+          right: "calc(max(1rem, env(safe-area-inset-right)) + 5rem)",
+          top: "max(1rem, env(safe-area-inset-top))",
+        }}
+        aria-label={locale === "zh" ? "命盘解读" : "Chart reading"}
+      >
+        ✦
+      </button>
+
+      <ChartInsights
+        open={insightsOpen}
+        onClose={() => setInsightsOpen(false)}
+        archetype={archetype}
+        locale={locale}
+      />
 
       <div className="relative z-10 flex flex-1 flex-col items-center justify-center">
         <MiraCharacter

@@ -6,6 +6,7 @@
   },
   "onboarding": {
     "heading": "Tell me when you arrived.",
+    "subtitle": "Where you began — I'll take it from there.",
     "dobLabel": "Date of birth",
     "timeLabel": "Time of birth",
     "timeUnknownLabel": "I don't know my exact birth time",

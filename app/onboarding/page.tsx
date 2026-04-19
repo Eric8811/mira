@@ -74,87 +74,128 @@ export default function Onboarding() {
   }
 
   return (
-    <main className="mira-stars relative flex min-h-screen items-center justify-center px-8 py-16">
+    <main
+      className="mira-stars relative flex min-h-[100dvh] items-start justify-center px-4 py-8 sm:items-center"
+      style={{
+        paddingTop: "max(2.5rem, env(safe-area-inset-top))",
+        paddingBottom: "max(2rem, env(safe-area-inset-bottom))",
+      }}
+    >
       <motion.form
         onSubmit={onSubmit}
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
-        className="relative z-10 w-full max-w-lg space-y-8"
+        transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
+        className="relative z-10 flex w-full max-w-md flex-col items-center gap-6"
       >
-        <h1 className="font-serif-display text-center text-3xl font-medium leading-snug md:text-4xl">
-          {t("heading")}
-        </h1>
-
-        <div className="space-y-2">
-          <label className="block text-sm uppercase tracking-[0.2em] text-white/60">
-            {t("dobLabel")}
-          </label>
-          <input
-            type="date"
-            value={dob}
-            onChange={(e) => setDob(e.target.value)}
-            className="w-full rounded-lg border border-white/20 bg-white/5 px-4 py-3 text-white focus:border-[var(--mira-accent)] focus:outline-none"
-            required
-          />
-          {dobError && <p className="text-sm text-red-400">{dobError}</p>}
+        {/* Step indicator */}
+        <div className="flex items-center gap-2">
+          <span className="h-1.5 w-6 rounded-full bg-[var(--mira-accent)]" />
+          <span className="h-1.5 w-3 rounded-full bg-white/15" />
         </div>
 
-        <div className="space-y-2">
-          <label className="block text-sm uppercase tracking-[0.2em] text-white/60">
-            {t("timeLabel")}
-          </label>
-          <select
-            value={birthHour}
-            onChange={(e) => setBirthHour(Number(e.target.value))}
-            disabled={timeUnknown}
-            className="w-full rounded-lg border border-white/20 bg-white/5 px-4 py-3 text-white focus:border-[var(--mira-accent)] focus:outline-none disabled:opacity-50"
-          >
-            {hours.map((h) => (
-              <option key={h} value={h} className="bg-[#1A0E2E]">
-                {t(`hours.${h}`)}
-              </option>
-            ))}
-          </select>
-          <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-white/70">
+        {/* Floating card */}
+        <div
+          className="w-full space-y-7 rounded-[28px] border border-[var(--mira-accent)]/20 bg-black/45 p-6 backdrop-blur-xl sm:p-8"
+          style={{
+            boxShadow:
+              "0 20px 60px -20px rgba(80, 50, 140, 0.45), 0 0 40px -10px rgba(212, 175, 55, 0.2), inset 0 1px 0 rgba(255,255,255,0.05)",
+          }}
+        >
+          <div className="space-y-2 text-center">
+            <h1 className="font-serif-display text-2xl font-medium leading-snug sm:text-3xl">
+              {t("heading")}
+            </h1>
+            <p className="font-serif-display text-sm italic text-white/55 sm:text-base">
+              {t("subtitle")}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-[11px] uppercase tracking-[0.25em] text-white/50">
+              {t("dobLabel")}
+            </label>
             <input
-              type="checkbox"
-              checked={timeUnknown}
-              onChange={(e) => setTimeUnknown(e.target.checked)}
-              className="h-4 w-4 rounded border-white/30 bg-white/5 accent-[var(--mira-accent)]"
+              type="date"
+              value={dob}
+              onChange={(e) => setDob(e.target.value)}
+              className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-4 text-base text-white transition focus:border-[var(--mira-accent)]/60 focus:bg-white/10 focus:outline-none"
+              required
             />
-            {t("timeUnknownLabel")}
-          </label>
-        </div>
+            {dobError && <p className="text-sm text-red-400">{dobError}</p>}
+          </div>
 
-        <div className="space-y-2">
-          <label className="block text-sm uppercase tracking-[0.2em] text-white/60">
-            {t("genderLabel")}
-          </label>
-          <div className="flex gap-3">
-            {(["female", "male"] as const).map((g) => (
-              <button
-                key={g}
-                type="button"
-                onClick={() => setGender(g)}
-                className={`flex-1 rounded-lg border px-4 py-3 transition ${
-                  gender === g
-                    ? "border-[var(--mira-accent)] bg-[var(--mira-accent)]/15 text-white"
-                    : "border-white/20 bg-white/5 text-white/70 hover:border-white/40"
-                }`}
+          <div className="space-y-2">
+            <label className="block text-[11px] uppercase tracking-[0.25em] text-white/50">
+              {t("timeLabel")}
+            </label>
+            <div className="relative">
+              <select
+                value={birthHour}
+                onChange={(e) => setBirthHour(Number(e.target.value))}
+                disabled={timeUnknown}
+                className="w-full appearance-none rounded-2xl border border-white/15 bg-white/5 px-4 py-4 pr-10 text-base text-white transition focus:border-[var(--mira-accent)]/60 focus:bg-white/10 focus:outline-none disabled:opacity-40"
               >
-                {g === "female" ? t("genderFemale") : t("genderMale")}
-              </button>
-            ))}
+                {hours.map((h) => (
+                  <option key={h} value={h} className="bg-[#1A0E2E] text-white">
+                    {t(`hours.${h}`)}
+                  </option>
+                ))}
+              </select>
+              <svg
+                className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40"
+                viewBox="0 0 20 20"
+                aria-hidden
+              >
+                <path d="M5.25 7.75L10 12.5l4.75-4.75" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <label className="mt-3 flex cursor-pointer items-center gap-3 py-1 text-sm text-white/65">
+              <input
+                type="checkbox"
+                checked={timeUnknown}
+                onChange={(e) => setTimeUnknown(e.target.checked)}
+                className="h-[18px] w-[18px] rounded-md border-white/30 bg-white/5 accent-[var(--mira-accent)]"
+              />
+              {t("timeUnknownLabel")}
+            </label>
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-[11px] uppercase tracking-[0.25em] text-white/50">
+              {t("genderLabel")}
+            </label>
+            <div className="flex gap-3">
+              {(["female", "male"] as const).map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => setGender(g)}
+                  className={`flex-1 rounded-2xl border px-4 py-4 text-base transition active:scale-[0.98] ${
+                    gender === g
+                      ? "border-[var(--mira-accent)]/70 bg-[var(--mira-accent)]/15 text-white shadow-[0_0_20px_-5px_rgba(212,175,55,0.4)]"
+                      : "border-white/15 bg-white/5 text-white/65 hover:border-white/30"
+                  }`}
+                >
+                  {g === "female" ? t("genderFemale") : t("genderMale")}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
+        {/* Submit */}
         <button
           type="submit"
           disabled={submitting}
-          className="w-full rounded-full border border-[var(--mira-accent)]/60 bg-[var(--mira-accent)]/10 py-4 text-sm font-medium uppercase tracking-[0.25em] text-[var(--mira-accent)] transition hover:bg-[var(--mira-accent)]/20 disabled:opacity-50"
+          className="relative w-full overflow-hidden rounded-full py-4 text-sm font-medium uppercase tracking-[0.28em] text-white transition active:scale-[0.97] disabled:opacity-60"
+          style={{
+            minHeight: 56,
+            background: "linear-gradient(135deg, rgba(124, 58, 237, 0.9) 0%, rgba(212, 175, 55, 0.85) 100%)",
+            boxShadow: "0 10px 30px -8px rgba(124, 58, 237, 0.5), 0 0 20px -5px rgba(212, 175, 55, 0.3)",
+          }}
         >
-          {submitting ? "…" : t("submit")}
+          <span className="relative z-10">{submitting ? "…" : `✦  ${t("submit")}`}</span>
         </button>
       </motion.form>
     </main>

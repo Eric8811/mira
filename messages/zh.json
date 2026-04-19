@@ -6,6 +6,7 @@
   },
   "onboarding": {
     "heading": "告诉我，你是什么时候来到这里的。",
+    "subtitle": "在这里告诉我你的起点——剩下的交给我。",
     "dobLabel": "出生日期",
     "timeLabel": "出生时辰",
     "timeUnknownLabel": "我不知道具体时辰",
