@@ -9,8 +9,6 @@
 //   (last 5 min) into the instructions field. DashScope's conversation.item.create doesn't
 //   process text user turns reliably, so we fake memory via instructions.
 // - Noise-gate on the input path skips near-silent chunks to keep VAD from misfiring.
-// - While Mira is speaking, mic frames are held back to avoid speaker echo
-//   triggering a fake user turn on no-headphones demos.
 
 import { buildInstructionsWithHistory } from "./realtime-config";
 import type { MiraSession } from "./session";
@@ -99,8 +97,6 @@ export class RealtimeSession {
   // of their sentence never triggers speech_stopped on the server.
   private speechActive = false;
   private inputMuted = false;
-  private assistantOutputActive = false;
-  private assistantResponseDone = true;
 
   constructor(events: RealtimeEvents) {
     this.events = events;
@@ -160,6 +156,15 @@ export class RealtimeSession {
     await this.openWebSocket();
     this.startHeartbeat();
     this.events.onReconnected?.();
+  }
+
+  private refreshSessionMemory() {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.config?.miraSession) return;
+    const instructions = buildInstructionsWithHistory(
+      this.config.miraSession,
+      this.getRecentHistory(),
+    );
+    this.send({ type: "session.update", session: { instructions } });
   }
 
   private armResponseWatchdog() {
@@ -409,7 +414,7 @@ export class RealtimeSession {
           else this.pendingCapture[0] = head.subarray(take);
         }
         this.pendingCaptureLen -= INPUT_CHUNK_SAMPLES;
-        if (this.inputMuted || this.assistantOutputActive) continue;
+        if (this.inputMuted) continue;
         // Gate silent frames ONLY while idle (between turns).
         // Once the server detects speech_started, keep streaming every frame —
         // server VAD needs the silence tail to fire speech_stopped.
@@ -517,6 +522,7 @@ export class RealtimeSession {
         const t = msg.transcript as string | undefined;
         if (t) {
           this.history.push({ role: "user", text: t, ts: Date.now() });
+          this.refreshSessionMemory();
           this.events.onUserTranscript?.(t);
         }
         break;
@@ -526,8 +532,6 @@ export class RealtimeSession {
         const delta = msg.delta as string | undefined;
         if (delta) {
           this.clearResponseWatchdog();
-          this.assistantOutputActive = true;
-          this.assistantResponseDone = false;
           if (!this.firstAudioEmitted) {
             this.firstAudioEmitted = true;
             console.log(`[mira] ← first audio.delta @ ${Math.round(performance.now())}`);
@@ -546,6 +550,7 @@ export class RealtimeSession {
         const transcript = (msg.transcript as string | undefined) ?? "";
         if (transcript) {
           this.history.push({ role: "assistant", text: transcript, ts: Date.now() });
+          this.refreshSessionMemory();
         }
         this.events.onAssistantTranscriptDone?.(transcript);
         break;
@@ -553,8 +558,6 @@ export class RealtimeSession {
       case "response.done":
         this.clearResponseWatchdog();
         this.firstAudioEmitted = false;
-        this.assistantResponseDone = true;
-        if (this.activeSources.size === 0) this.assistantOutputActive = false;
         this.events.onResponseDone?.();
         break;
       case "error": {
@@ -605,9 +608,6 @@ export class RealtimeSession {
     this.activeSources.add(src);
     src.onended = () => {
       this.activeSources.delete(src);
-      if (this.activeSources.size === 0 && this.assistantResponseDone) {
-        this.assistantOutputActive = false;
-      }
       try { fader.disconnect(); } catch {}
     };
   }
@@ -624,8 +624,6 @@ export class RealtimeSession {
     this.activeSources.clear();
     this.nextPlayTime = this.outCtx.currentTime;
     this.firstAudioEmitted = false;
-    this.assistantOutputActive = false;
-    this.assistantResponseDone = true;
   }
 
   getOutputAnalyser(): AnalyserNode | null {

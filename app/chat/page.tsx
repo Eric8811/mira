@@ -90,6 +90,7 @@ export default function Chat() {
     startedRef.current = true;
 
     const alreadyDelivered = sessionStorage.getItem(ENCOUNTER_FLAG) === "true";
+    let micStartRequested = false;
 
     const rt = new RealtimeSession({
       onUserSpeechStarted: () => setState("hearing"),
@@ -99,6 +100,18 @@ export default function Chat() {
         setState("listening");
         if (!alreadyDelivered) {
           sessionStorage.setItem(ENCOUNTER_FLAG, "true");
+          if (!micStartRequested) {
+            micStartRequested = true;
+            rtRef.current?.startInputCapture()
+              .then(() => {
+                setMicGranted(true);
+                setMicPrompt(false);
+              })
+              .catch((e) => {
+                console.warn("[chat] mic pending user action", e);
+                setMicPrompt(true);
+              });
+          }
         }
       },
       onReconnecting: (attempt) => {
@@ -143,13 +156,16 @@ export default function Chat() {
         rt.triggerResponse(buildEncounterTrigger(s));
       }
 
-      try {
-        await rt.startInputCapture();
-        setMicGranted(true);
-        if (alreadyDelivered) setState("listening");
-      } catch (e) {
-        console.warn("[chat] mic pending user action", e);
-        setMicPrompt(true);
+      if (alreadyDelivered) {
+        try {
+          micStartRequested = true;
+          await rt.startInputCapture();
+          setMicGranted(true);
+          setState("listening");
+        } catch (e) {
+          console.warn("[chat] mic pending user action", e);
+          setMicPrompt(true);
+        }
       }
     })();
 
