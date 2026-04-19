@@ -110,6 +110,25 @@ export function HamburgerMenu({
                   <span className="text-[15px]">{item.label}</span>
                 </button>
               ))}
+
+              {/* External link separator */}
+              <div className="mx-4 my-2 border-t border-white/5" />
+
+              <a
+                href="https://tally.so/r/lblKJp"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={onClose}
+                className="flex items-center gap-4 rounded-2xl px-4 py-3 text-left text-white/85 transition hover:bg-white/5 active:bg-white/10"
+              >
+                <span className="w-6 text-center text-lg" style={{ color: meta.accent }}>
+                  💬
+                </span>
+                <span className="flex-1 text-[15px]">
+                  {locale === "zh" ? "反馈建议" : "Share Feedback"}
+                </span>
+                <span className="text-xs text-white/30">↗</span>
+              </a>
             </nav>
 
             <div className="mx-4 border-t border-white/5" />
